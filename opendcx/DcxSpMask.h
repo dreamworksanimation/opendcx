@@ -1,0 +1,429 @@
+///////////////////////////////////////////////////////////////////////////
+//
+// Copyright (c) 2016 DreamWorks Animation LLC. 
+//
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+// *       Redistributions of source code must retain the above
+//         copyright notice, this list of conditions and the following
+//         disclaimer.
+// *       Redistributions in binary form must reproduce the above
+//         copyright notice, this list of conditions and the following
+//         disclaimer in the documentation and/or other materials
+//         provided with the distribution.
+// *       Neither the name of DreamWorks Animation nor the names of its
+//         contributors may be used to endorse or promote products
+//         derived from this software without specific prior written
+//         permission.
+// 
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+///////////////////////////////////////////////////////////////////////////
+///
+/// @file DcxSpMask.h
+
+#ifndef INCLUDED_DCX_SPMASK_H
+#define INCLUDED_DCX_SPMASK_H
+
+//-----------------------------------------------------------------------------
+//
+//  const   DeepFlag(s)
+//  enum    SpMaskMode
+//  enum    InterpolationMode
+//
+//  class   SpMask8
+//
+//-----------------------------------------------------------------------------
+
+#include "DcxAPI.h"
+
+#include <cstddef>
+#include <stdint.h> // for uint64_t
+#include <math.h> // for floorf
+#include <iostream>
+
+OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
+
+
+//
+// Per-sample metadata flag constants
+//
+
+typedef uint32_t DeepFlag;
+static const DeepFlag  DEEP_EMPTY_FLAG              = 0x00; // Empty flag
+static const DeepFlag  DEEP_LINEAR_INTERP_SAMPLE    = 0x01; // Linear surface sample interpolation (not volumetric)
+static const DeepFlag  DEEP_MATTE_OBJECT_SAMPLE     = 0x02; // Matte sample that cuts-out (blackens) other samples
+static const DeepFlag  DEEP_ADDITIVE_SAMPLE         = 0x04; // Additive sample which plusses with adjacent additive samples
+static const DeepFlag  DEEP_PARTIAL_BIN_COVERAGE    = 0x08; // Sample includes partial-coverage weighting for the enabled mask bits
+static const DeepFlag  DEEP_FLAG5                   = 0x10; // Placeholder
+static const DeepFlag  DEEP_FLAG6                   = 0x20; // Placeholder
+static const DeepFlag  DEEP_FLAG7                   = 0x40; // Placeholder
+static const DeepFlag  DEEP_FLAG8                   = 0x80; // Placeholder
+//
+static const DeepFlag  DEEP_ALL_FLAGS               = 0xff;
+
+
+//
+// Mask handling modes
+// (TODO: deprecate - we're not supporting adaptive bit counts anymore...)
+//
+
+enum SpMaskMode
+{
+    SPMASK_OFF,         // Don't import/export a mask
+    SPMASK_AUTO,        // Determine mask size from number of active channels in 'spmask' layer
+    SPMASK_4x4,         // Force 4x4 mask
+    SPMASK_8x8,         // Force 8x8 mask
+    SPMASK_16x16,       // Force 16x16 mask
+
+    NUM_MASKMODES
+};
+
+//
+// Segment interpolation modes for flattening operations
+//
+
+enum InterpolationMode
+{
+    INTERP_OFF,         // Disable interpolation
+    INTERP_AUTO,        // Determine interpolation from per-sample metadata (DeepFlags)
+    INTERP_LOG,         // Use log interpolation for all samples
+    INTERP_LIN,         // Use linear interpolation for all samples
+
+    NUM_INTERPOLATIONMODES
+};
+
+
+
+#if 0
+typedef uint64_t SpMask8; // old bitmask type
+#endif
+
+//-----------------------------------------------------------------------------
+//
+// class SpMask8
+//
+//      An 8x8 A-buffer bitmask class which wraps a 64-bit unsigned int.
+//      It offers convenience methods for x/y bit access and translating
+//      to/from floats for I/O.
+//
+//      The pattern is spatially interpreted with the lowest bit 0 in the
+//      lower-left corner and the highest bit 63 in the upper-right corner
+//      and always oriented Y-up.  This matches most current applications and
+//      renderers (c 2016) - even though OpenEXR's pixel coordinate axis is
+//      Y-down.
+//
+//        -------------------
+//      7 |56 . . . . . . 63| +Y
+//      6 | . . . . . . . . | 
+//      5 | . . . . . . . . | 
+//      4 | . . . . . . . . | 
+//      3 | . . . . . . . . | 
+//      2 | . . . . . . . . | 
+//      1 | . . . . . . . . | 
+//      0 | 0 . . . . . . 7 | -Y
+//        -------------------
+//    -X    0 1 2 3 4 5 6 7  +X
+//
+//-----------------------------------------------------------------------------
+
+class DCX_EXPORT SpMask8
+{
+  public:
+    static const int        width        =  8;
+    static const int        height       =  8;
+    static const int        numBits      = 64;
+    static const uint64_t   allBitsOff   = 0x0ull;
+    static const uint64_t   allBitsOn    = 0xffffffffffffffffull;
+    static const SpMask8    zeroCoverage;   // all bits off
+    static const SpMask8    fullCoverage;   // all bits on
+
+
+  public:
+
+    SpMask8 (); // sets mask to zero
+    SpMask8 (uint64_t);
+    SpMask8 (const SpMask8&);
+
+    SpMask8& operator = (uint64_t rhs);
+    SpMask8& operator = (const SpMask8&);
+
+    operator uint64_t() const;
+
+    uint64_t   value() const;
+
+    bool operator [] (int bit) const;  // read a bit by index
+
+    static uint32_t getSubpixelIndex (int sx,
+                                      int sy);
+
+    //
+    // Bitwise ops
+    //
+
+    SpMask8  operator &  (const SpMask8& rhs) const;
+    SpMask8  operator |  (const SpMask8& rhs) const;
+    SpMask8  operator ^  (const SpMask8& rhs) const;
+    SpMask8  operator ~  () const;
+
+    SpMask8& operator &= (const SpMask8& rhs);
+    SpMask8& operator |= (const SpMask8& rhs);
+    SpMask8& operator ^= (const SpMask8& rhs);
+
+    SpMask8  operator << (int rhs) const;
+    SpMask8  operator >> (int rhs) const;
+
+    SpMask8& operator <<= (int rhs);
+    SpMask8& operator >>= (int rhs);
+
+    SpMask8& operator ++ (int); // postfix++, same as <<=
+    SpMask8& operator ++ ();    //  ++prefix, same as <<=
+    SpMask8& operator -- (int); // postfix--, same as >>=
+    SpMask8& operator -- ();    //  --prefix, same as >>=
+
+    bool     operator == (int rhs) const;
+    bool     operator == (uint64_t rhs) const;
+    bool     operator == (const SpMask8& rhs) const;
+    bool     operator != (int rhs) const;
+    bool     operator != (uint64_t rhs) const;
+    bool     operator != (const SpMask8& rhs) const;
+
+
+    //
+    // Convert to/from floats
+    // TODO: handle endianness!
+    //
+
+    void    fromFloat (float sp1,
+                       float sp2);
+    void    toFloat (float& sp1,
+                     float& sp2) const;
+
+
+    //
+    // Read/write subpixel bits
+    //
+
+    bool    isSubpixelOn (int sx,
+                          int sy) const;
+    void    setSubpixel (int sx,
+                         int sy);
+    void    setSubpixels (int sx,
+                          int sy,
+                          int sr,
+                          int st);
+    void    unsetSubpixel (int sx,
+                           int sy);
+    void    unsetSubpixels (int sx,
+                            int sy,
+                            int sr,
+                            int st);
+
+
+    //
+    // Map X/Y coord from a different mask size into SpMask8 range.
+    // Output coords can be an overlap range.
+    //
+
+    static void mapXCoord (int inX,
+                           int inW,
+                           int& outX,
+                           int& outR);
+    static void mapYCoord (int inY,
+                           int inH,
+                           int& outY,
+                           int& outT);
+
+
+    //
+    // Bit count / coverage
+    //
+
+    int     bitsOn () const;
+    int     bitsOff() const;
+    float   toCoverage() const;
+
+
+    //
+    // Print the bit pattern as a text grid
+    //
+
+    void    printPattern (std::ostream&,
+                          const char* prefix) const;
+
+    //
+    // Print the mask as a hex value
+    //
+
+    friend  std::ostream& operator << (std::ostream&,
+                                       const SpMask8&);
+
+
+  private:
+    union floatUnion
+    {
+        uint64_t as_mask;
+        float    as_float[2];
+    };
+
+    uint64_t    m;  // the bitmask
+
+};
+
+
+
+//-----------------
+// Inline Functions
+//-----------------
+
+inline SpMask8::SpMask8 () : m(0) {}
+inline SpMask8::SpMask8 (uint64_t spmask) : m(spmask) {}
+inline SpMask8::SpMask8 (const SpMask8& b) : m(b.m) {}
+//
+inline SpMask8& SpMask8::operator = (uint64_t rhs) { m = rhs; return *this; }
+inline SpMask8& SpMask8::operator = (const SpMask8& rhs) { if (this != &rhs) m = rhs.m; return *this; }
+//
+inline SpMask8::operator uint64_t() const { return m; }
+//
+inline SpMask8  SpMask8::operator &  (const SpMask8& rhs) const { return SpMask8(m & rhs.m); }
+inline SpMask8  SpMask8::operator |  (const SpMask8& rhs) const { return SpMask8(m | rhs.m); }
+inline SpMask8  SpMask8::operator ^  (const SpMask8& rhs) const { return SpMask8(m ^ rhs.m); }
+inline SpMask8  SpMask8::operator ~  () const { return SpMask8(~m); }
+//
+inline SpMask8& SpMask8::operator &= (const SpMask8& rhs) { m &= rhs.m; return *this; }
+inline SpMask8& SpMask8::operator |= (const SpMask8& rhs) { m |= rhs.m; return *this; }
+inline SpMask8& SpMask8::operator ^= (const SpMask8& rhs) { m ^= rhs.m; return *this; }
+//
+inline SpMask8  SpMask8::operator << (int rhs) const { return SpMask8(m << rhs); }
+inline SpMask8  SpMask8::operator >> (int rhs) const { return SpMask8(m >> rhs); }
+//
+inline SpMask8& SpMask8::operator <<= (int rhs) { m <<= rhs; return *this; }
+inline SpMask8& SpMask8::operator >>= (int rhs) { m >>= rhs; return *this; }
+//
+inline SpMask8& SpMask8::operator ++ (int) { m <<= 1; return *this; };
+inline SpMask8& SpMask8::operator ++ ()    { m <<= 1; return *this; };
+inline SpMask8& SpMask8::operator -- (int) { m >>= 1; return *this; };
+inline SpMask8& SpMask8::operator -- ()    { m >>= 1; return *this; };
+//
+inline bool     SpMask8::operator == (int rhs) const { return (m == (uint64_t)rhs); }
+inline bool     SpMask8::operator == (uint64_t rhs) const { return (m == rhs); }
+inline bool     SpMask8::operator == (const SpMask8& rhs) const { return (m == rhs.m); }
+inline bool     SpMask8::operator != (int rhs) const { return (m != (uint64_t)rhs); }
+inline bool     SpMask8::operator != (uint64_t rhs) const { return (m != rhs); }
+inline bool     SpMask8::operator != (const SpMask8& rhs) const { return (m != rhs.m); }
+//
+inline void SpMask8::fromFloat (float sp1, float sp2)
+{
+    floatUnion mask_union;
+    mask_union.as_float[0] = sp1;
+    mask_union.as_float[1] = sp2;
+    m = mask_union.as_mask;
+}
+inline void SpMask8::toFloat (float& sp1, float& sp2) const
+{
+    floatUnion mask_union;
+    mask_union.as_mask = m;
+    sp1 = mask_union.as_float[0];
+    sp2 = mask_union.as_float[1];
+}
+inline uint64_t SpMask8::value() const { return m; }
+inline bool SpMask8::operator [] (int bit) const { return (m & (1ull << bit))!=0; }
+inline /*static*/ uint32_t getSubpixelIndex (int sx, int sy) { return (1ull << ((sy << 3) + sx)); }
+inline bool SpMask8::isSubpixelOn (int sx, int sy) const { return (m & getSubpixelIndex(sx, sy))!=0; }
+inline void SpMask8::setSubpixel (int sx, int sy) { m |= (1ull << ((sy << 3) + sx)); }
+inline void SpMask8::setSubpixels (int sx, int sy, int sr, int st)
+{
+    for (int y=sy; y <= st; ++y)
+        for (int x=sx; x <= sr; ++x)
+            setSubpixel(x, y);
+}
+inline void SpMask8::unsetSubpixel (int sx, int sy) { m &= ~(1ull << ((sy << 3) + sx)); }
+inline void SpMask8::unsetSubpixels (int sx, int sy, int sr, int st)
+{
+    for (int y=sy; y <= st; ++y)
+        for (int x=sx; x <= sr; ++x)
+            unsetSubpixel(x, y);
+}
+inline int SpMask8::bitsOn () const
+{
+    if (m==allBitsOff || m==allBitsOn)
+        return numBits;
+#if 1
+#define BX_(x) ((x) - (((x)>>1)&0x77777777)  \
+                    - (((x)>>2)&0x33333333)  \
+                    - (((x)>>3)&0x11111111))
+#define BITCOUNT(x) (((BX_(x)+(BX_(x)>>4)) & 0x0F0F0F0F) % 255)
+    const uint32_t lo = uint32_t(m);
+    const uint32_t hi = uint32_t(m >> 32);
+    return BITCOUNT(lo) + BITCOUNT(hi);
+#else
+    int numOnBits = 0;
+    SpMask8 sp(1ull);
+    for (uint32_t sp_bin=0; sp_bin < numBits; ++sp_bin, ++sp)
+        if (m & sp)
+            ++numOnBits;
+    return numOnBits;
+#endif
+}
+inline int SpMask8::bitsOff() const { return (numBits - bitsOn()); }
+inline /*static*/ void SpMask8::mapXCoord (int inX, int inW, int& outX, int& outR)
+{
+    if (inW == Dcx::SpMask8::width)
+        outX = outR = inX;
+    else
+    {
+        const float fX = float(inX);
+        const float scale = float(Dcx::SpMask8::width) / float(inW);
+        outX = (int)floorf(fX * scale);
+        outR = (int)floorf((fX + 0.999) * scale);
+    }
+}
+inline /*static*/ void SpMask8::mapYCoord (int inY, int inH, int& outY, int& outT)
+{
+    if (inH == Dcx::SpMask8::height)
+        outY = outT = inY;
+    else
+    {
+        const float fY = float(inY);
+        const float scale = float(Dcx::SpMask8::height) / float(inH);
+        outY = (int)floorf(fY * scale);
+        outT = (int)floorf((fY + 0.999) * scale);
+    }
+}
+inline float SpMask8::toCoverage() const
+{
+    if (m==allBitsOff || m==allBitsOn)
+        return 1.0f; // Zero mask indicates source doesn't have subpixel masks so weight is also 1
+    const int numOnBits = bitsOn();
+    return (numOnBits == 0)?0.0f:float(numOnBits)/float(numBits);
+}
+inline void SpMask8::printPattern (std::ostream& os,
+                                   const char* prefix) const
+{
+    for (int sy=(int)(SpMask8::width-1); sy >= 0; --sy)
+    {
+        SpMask8 sp(1ull << (sy << 3));
+        os << prefix;
+        for (int sx=0; sx < (int)SpMask8::width; ++sx, ++sp)
+            if (m & sp) os << "1 "; else os << ". ";
+        os << std::endl;
+    }
+}
+
+
+OPENDCX_INTERNAL_NAMESPACE_HEADER_EXIT
+
+#endif // INCLUDED_DCX_SPMASK_H

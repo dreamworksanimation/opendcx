@@ -1,0 +1,7 @@
+OpenDCX Version History
+=======================
+
+Version 2.2.0 - July 21 2016 (initial public release)
+    - Channel support system similar to Nuke's providing channel loop macros and boolean channel set operations (ChannelSet)
+    - Primary flattening algorithm with linear/log interpolation, matte cutout and subpixel mask support (DeepPixel)
+    - Simple 2D transform class supporting resampling of subpixel masks and subpixel filtering
