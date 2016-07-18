@@ -1,0 +1,12 @@
+========================================================================
+                               OpenDCX
+========================================================================
+
+OpenDCX is an open-source C++ library comprising extensions for the 
+OpenEXR library and its deep file format. It adds support for per
+deep-sample metadata adding subpixel-masks and surface-type flags,
+and provides utility functions to manipulate deep pixels with this
+metadata.
+
+For more details visit the project's home page:
+www.opendcx.org
