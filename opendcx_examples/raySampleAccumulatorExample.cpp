@@ -49,7 +49,6 @@
 
 #include <OpenDCX/DcxDeepImageTile.h>
 #include <OpenDCX/DcxDeepTransform.h>  // for radians()
-#include <OpenDCX/DcxImageFormat.h>
 
 
 #define DEBUG_TRACER 1
@@ -179,9 +178,9 @@ struct MySphere
 
 enum PrimType
 {
-    SPHERE      = 0,    // Only support spheres in this example
-    //DISC        = 1,
-    //TRIANGLE    = 2
+    PRIMTYPE_SPHERE         = 0,    // Only support spheres in this example
+    //PRIMTYPE_DISC           = 1,
+    //PRIMTYPE_TRIANGLE       = 2
 };
 
 
@@ -502,7 +501,7 @@ main (int argc, char *argv[])
                                     I.tmin     = tmin;
                                     I.tmax     = tmin;
                                     I.primPtr  = (void*)&sphere;
-                                    I.primType = PrimType::SPHERE;
+                                    I.primType = PRIMTYPE_SPHERE;
                                     I.color    = sphere.color;
                                     I.N        = N;
                                     I.spmask   = outSpMask;
@@ -522,7 +521,7 @@ main (int argc, char *argv[])
                             assert(I.primPtr);
 
                             // We only understand spheres in this example...:
-                            if (I.primType != PrimType::SPHERE)
+                            if (I.primType != PRIMTYPE_SPHERE)
                                 continue;
                             const MySphere* sphere = static_cast<MySphere*>(I.primPtr);
 

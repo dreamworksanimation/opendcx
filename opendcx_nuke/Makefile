@@ -32,15 +32,6 @@
 # Makefile for OpenDCX Nuke plugins
 #
 
-#---------------------------------------------------------------------------
-# DWA local build settings, remove before publishing:
-CXX              := /rel/lang/gcc/gcc412/bin/g++412
-LDFLAGS          := -Wl,-rpath,/rel/lang/gcc/gcc412/lib64 -L/rel/lang/gcc/gcc412/lib64
-NUKE_LOCATION    := /rel/third_party/nuke/9.0v6_64
-OPENEXR_INCL_DIR := /rel/folio/openexr/openexr-2.2.0.d.w.a.5.0-latest/include
-OPENEXR_LIB_DIR  := /rel/folio/openexr/openexr-2.2.0.d.w.a.5.0-latest/lib
-#---------------------------------------------------------------------------
-
 
 # Targets:
 #   all
@@ -50,9 +41,8 @@ OPENEXR_LIB_DIR  := /rel/folio/openexr/openexr-2.2.0.d.w.a.5.0-latest/lib
 #
 # Options:
 #   shared=no           link executables against static OpenDCX libraries
-#                       (default: link against shared libraries)
+#                       (default=yes: link against shared libraries)
 #   debug=yes           build with debugging symbols and without optimization
-#   verbose=yes         run commands in verbose mode
 
 
 #
@@ -70,7 +60,7 @@ $(warning Warning: $$(NUKE_LOCATION) is not set)
 endif
 
 
-# The directory into which to install libraries and header files
+# The directory into which to install files
 # (it is recommended that this match the DESTDIR in the OpenDCX
 # library makefile)
 DESTDIR := /tmp/OpenDCX
@@ -154,12 +144,6 @@ ifeq (yes,$(strip $(debug)))
     OPTIMIZE := -g
 else
     OPTIMIZE := -O3 -DNDEBUG
-endif
-
-ifeq (yes,$(strip $(verbose)))
-    QUIET :=
-else
-    QUIET := > /dev/null
 endif
 
 INCLDIRS := \
@@ -254,7 +238,7 @@ NUKE_PLUGIN_SO_NAMES := \
 #$(addprefix $(NUKE_DESTDIR)/,$(notdir $(NUKE_PLUGIN_SRC_NAMES:.cpp=.so)))
 
 
-DEPEND := nuke_deps
+DEPEND := dependencies
 
 # Get the list of dependencies that are newer than the current target,
 # but limit the list to at most three entries.
@@ -270,7 +254,7 @@ ALL_TARGETS := \
 
 .PHONY: all clean depend install
 
-all: depend
+all: depend $(NUKE_PLUGIN_SO_NAMES)
 
 $(NUKE_PLUGIN_OBJ_NAMES): %.o: %.cpp
 	@echo "-----------------------------------------------------------------"
@@ -278,7 +262,7 @@ $(NUKE_PLUGIN_OBJ_NAMES): %.o: %.cpp
 	$(CXX) -c $(CXXFLAGS) -fPIC -o $@ $<
 
 $(NUKE_PLUGIN_SO_NAMES): nuke/%.so: nuke/%.o $(NUKE_SHARED_SRC_NAMES:.cpp=.o)
-	@echo "Linking $@ because of $(call list_deps)"
+	@echo "  Linking $@ because of $(call list_deps)"
 	$(CXX) $(LDFLAGS) $(CXXFLAGS) -fPIC -Wl,-Bsymbolic -shared -o $@ $^ $(LIBS)
 
 install: $(NUKE_PLUGIN_SO_NAMES)

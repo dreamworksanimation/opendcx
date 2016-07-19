@@ -33,38 +33,20 @@
 #
 
 
-#---------------------------------------------------------------------------
-# DWA local build settings, remove before publishing:
-CXX              := /rel/lang/gcc/gcc412/bin/g++412
-LDFLAGS          := -Wl,-rpath,/rel/lang/gcc/gcc412/lib64 -L/rel/lang/gcc/gcc412/lib64
-OPENEXR_INCL_DIR := /rel/folio/openexr/openexr-2.2.0.d.w.a.5.0-latest/include
-OPENEXR_LIB_DIR  := /rel/folio/openexr/openexr-2.2.0.d.w.a.5.0-latest/lib
-#---------------------------------------------------------------------------
-
-
-# See INSTALL for a list of requirements.
-#
 # Targets:
 #   lib                 the OpenDCX library
 #
-#   dcx_print           command-line tool to inspect OpenDCX files
-#   dcx_render          command-line tool to ray-trace OpenDCX files
-#   dcx_test            unit tests for the OpenDCX library
-#
 #   all                 [default target] all of the above
-#   install             install all of the above
-#                       into subdirectories of DESTDIR
+#   install             install all of the above into subdirectories of DESTDIR
 #   depend              recompute source file header dependencies
 #   clean               delete generated files from the local directory
-#   test                run tests
 #
 # Options:
-#   shared=yes          produce shared OpenDCX libraries (default = yes)
-#   static=yes          produce static OpenDCX libraries (default = no)
-#                       the version # is added before .a to allow linking
-#                       against an explicit version
+#   shared=no           do not produce shared OpenDCX libraries (default=yes)
+#   static=no           do not produce static OpenDCX libraries (default=yes)
+#                       Note: for static lib the version # is added before .a
+#                       to allow linking against an explicit version
 #   debug=yes           build with debugging symbols and without optimization
-#   verbose=yes         run commands in verbose mode
 
 
 #
@@ -119,25 +101,12 @@ else
     OPTIMIZE := -O3 -DNDEBUG
 endif
 
-ifeq (yes,$(strip $(verbose)))
-    QUIET_TEST := -v
-else
-    QUIET_TEST := $(QUIET)
-endif
-
 INCLDIRS := -I . -I .. -isystem $(OPENEXR_INCL_DIR)
 
 #CXXFLAGS += -std=c++0x
 
 #CXXFLAGS += -pthread $(OPTIMIZE) $(INCLDIRS)
 CXXFLAGS += $(OPTIMIZE) $(INCLDIRS)
-
-# Default to building shared if shared and static not defined.
-ifndef shared
-    ifndef static
-        shared = yes
-    endif
-endif
 
 LIBS := \
     -L$(OPENEXR_LIB_DIR) $(OPENEXR_LIBS) \
@@ -153,46 +122,50 @@ ifdef LINUX
     LIBS_RPATH += -lrt
 endif
 
+#---------------------------------
+
+# lib files:
 INCLUDE_NAMES := \
         DcxAPI.h \
         DcxChannelAlias.h \
         DcxChannelDefs.h \
         DcxChannelSet.h \
-        DcxDeepAccumulator.h \
         DcxDeepImageTile.h \
         DcxDeepPixel.h \
         DcxDeepTile.h \
         DcxDeepTransform.h \
-        DcxImageFormat.h \
         DcxPixel.h \
         DcxSpMask.h \
-        version.h
+        version.h \
 #
 
 SRC_NAMES := \
     DcxChannelSet.cpp \
-    DcxDeepAccumulator.cpp \
     DcxDeepImageTile.cpp \
     DcxDeepPixel.cpp \
     DcxDeepTile.cpp \
     DcxDeepTransform.cpp \
-    DcxImageFormat.cpp
 #
 
+#---------------------------------
+
+# unit test files: (TODO)
 UNITTEST_INCLUDE_NAMES := \
 #
 
 UNITTEST_SRC_NAMES := \
 #
 
+#---------------------------------
+
+# commands files: (TODO)
 CMD_INCLUDE_NAMES := \
 #
 
 CMD_SRC_NAMES := \
-#    cmd/opendcx_print/main.cpp \
-#    cmd/opendcx_render/main.cpp \
-#    cmd/opendcx_view/main.cpp \
 #
+
+#---------------------------------
 
 HEADER_SUBDIRS := $(dir $(INCLUDE_NAMES))
 
@@ -238,7 +211,8 @@ endif
 LIBOPENDCX_RPATH := -Wl,-rpath,$(DESTDIR)/lib
 
 # static lib names:
-# The version # is put before .a to allow linking against an explicit version.
+# Note: the lib version # is put before .a to allow linking
+# against an explicit lib version.
 LIBOPENDCX_STATIC_NAME := $(LIBOPENDCX_NAME).a
 LIBOPENDCX_STATIC := $(LIBOPENDCX_NAME)-$(LIB_VERSION).a
 
@@ -249,31 +223,26 @@ ALL_PRODUCTS := \
     $(LIBOPENDCX_SHARED) \
     $(LIBOPENDCX_SONAME) \
     $(LIBOPENDCX_STATIC_NAME) \
-    $(LIBOPENDCX_STATIC)
-#    dcx_test \
-#    dcx_print \
-#    dcx_render \
-#    dcx_view
-
+    $(LIBOPENDCX_STATIC) \
+#
 
 BUILD_PRODUCTS := \
     $(DEPEND) \
-#    dcx_test \
-#    dcx_print \
-#    dcx_render \
-#    dcx_view
+#
 
-ifeq (yes,$(strip $(shared)))
+ifneq (no,$(strip $(shared)))
     BUILD_PRODUCTS += \
         $(LIBOPENDCX_SHARED_NAME) \
         $(LIBOPENDCX_SHARED) \
-        $(LIBOPENDCX_SONAME)
+        $(LIBOPENDCX_SONAME) \
+#
 endif
 
-ifeq (yes,$(strip $(static)))
+ifneq (no,$(strip $(static)))
     BUILD_PRODUCTS += \
         $(LIBOPENDCX_STATIC_NAME) \
-        $(LIBOPENDCX_STATIC)
+        $(LIBOPENDCX_STATIC) \
+#
 endif
 
 
@@ -287,13 +256,12 @@ list_deps = $(if $(wordlist 4,5,$(?F)),$(firstword $(?F)) and others,$(wordlist 
 
 .SUFFIXES: .o .cpp
 
-.PHONY: all clean depend install lib test
+.PHONY: all clean depend install lib
 
 .cpp.o:
 	@echo "Building $@ because of $(call list_deps)"
 	$(CXX) -c $(CXXFLAGS) -fPIC -o $@ $<
 
-#all: lib dcx_print dcx_render dcx_test depend
 all: lib depend
 
 $(OBJ_NAMES): %.o: %.cpp
@@ -301,7 +269,7 @@ $(OBJ_NAMES): %.o: %.cpp
 	@echo "$(BUILD_PRODUCTS)"
 	$(CXX) -c -DOPENDCX_PRIVATE $(CXXFLAGS) -fPIC -o $@ $<
 
-ifeq (yes,$(strip $(shared)))
+ifneq (no,$(strip $(shared)))
 # Build shared library
 lib: $(LIBOPENDCX_SHARED_NAME) $(LIBOPENDCX_SONAME)
 
@@ -316,7 +284,7 @@ $(LIBOPENDCX_SHARED): $(OBJ_NAMES)
 	$(CXX) $(LDFLAGS) $(CXXFLAGS) -shared -o $@ $^ $(LIBS_RPATH) $(LIBOPENDCX_SONAME_FLAGS)
 endif #shared
 
-ifeq (yes,$(strip $(static)))
+ifneq (no,$(strip $(static)))
 # Build static library
 lib: $(LIBOPENDCX_STATIC) $(LIBOPENDCX_STATIC_NAME)
 
@@ -329,47 +297,10 @@ $(LIBOPENDCX_STATIC_NAME): $(LIBOPENDCX_STATIC)
 endif #static
 
 
-#dcx_print: $(LIBOPENDCX) cmd/opendcx_print/main.cpp
-#	@echo "Building $@ because of $(list_deps)"
-#	$(CXX) $(CXXFLAGS) -o $@ cmd/opendcx_print/main.cpp -I . \
-#	    $(LIBOPENDCX_RPATH) -L$(CURDIR) $(LIBOPENDCX) \
-#	    $(LIBS_RPATH) $(CONCURRENT_MALLOC_LIB)
-
-#dcx_render: $(LIBOPENDCX) cmd/opendcx_render/main.cpp
-#	@echo "Building $@ because of $(list_deps)"
-#	$(CXX) $(CXXFLAGS) -o $@ cmd/opendcx_render/main.cpp -I . \
-#	    -isystem $(OPENEXR_INCL_DIR) -isystem $(ILMBASE_INCL_DIR) \
-#	    -Wl,-rpath,$(OPENEXR_LIB_DIR) -L$(OPENEXR_LIB_DIR) $(OPENEXR_LIB) \
-#	    -Wl,-rpath,$(ILMBASE_LIB_DIR) -L$(ILMBASE_LIB_DIR) $(ILMBASE_LIB) \
-#	    $(LIBOPENDCX_RPATH) -L$(CURDIR) $(LIBOPENDCX) \
-#	    $(LIBS_RPATH) $(CONCURRENT_MALLOC_LIB)
-
-# Create an opendcx_viewer/ symlink to the viewer/ subdirectory,
-# to mirror the DWA directory structure.
-#opendcx_viewer:
-#	ln -f -s viewer opendcx_viewer
-
 $(UNITTEST_OBJ_NAMES): %.o: %.cpp
 	@echo "Building $@ because of $(list_deps)"
 	$(CXX) -c $(CXXFLAGS) -fPIC -o $@ $<
 
-#ifneq (,$(strip $(CPPUNIT_INCL_DIR)))
-#dcx_test: $(LIBOPENDCX) $(UNITTEST_OBJ_NAMES)
-#	@echo "Building $@ because of $(list_deps)"
-#	$(CXX) $(CXXFLAGS) -o $@ $(UNITTEST_OBJ_NAMES) \
-#	    -Wl,-rpath,$(LIBOPENDCX_RPATH) -L$(CURDIR) $(LIBOPENDCX) $(LIBS_RPATH)
-#
-#test: lib dcx_test
-#	@echo "Testing $(LIBOPENDCX_NAME)"
-#	export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(CURDIR); ./dcx_test $(QUIET_TEST)
-#else
-#dcx_test:
-#	@echo "$@"': $$(CPPUNIT_INCL_DIR) is undefined'
-#test:
-#	@echo "$@"': $$(CPPUNIT_INCL_DIR) is undefined'
-#endif
-
-#install: lib dcx_print dcx_render dcx_view
 install: lib
 	mkdir -p $(DESTDIR)/include/OpenDCX
 	@echo "Created $(DESTDIR)/include/OpenDCX"
@@ -399,18 +330,6 @@ install: lib
 	    fi; \
 	    popd > /dev/null
 	@echo "Copied libOpenDCX to $(DESTDIR)/lib/"
-	#@#
-	#mkdir -p $(DESTDIR)/bin
-	#@echo "Created $(DESTDIR)/bin/"
-	#cp -f dcx_print $(DESTDIR)/bin
-	#@echo "Copied dcx_print to $(DESTDIR)/bin/"
-	#cp -f dcx_render $(DESTDIR)/bin
-	#@echo "Copied dcx_render to $(DESTDIR)/bin/"
-	#if [ -f dcx_view ]; \
-	#then \
-	#    cp -f dcx_view $(DESTDIR)/bin; \
-	#    echo "Copied dcx_view to $(DESTDIR)/bin/"; \
-	#fi
 
 # TODO: This accumulates all source file dependencies into a single file
 # containing a rule for each *.o file.  Consider generating a separate

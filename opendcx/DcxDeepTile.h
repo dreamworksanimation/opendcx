@@ -46,7 +46,6 @@
 
 #include "DcxDeepPixel.h"
 #include "DcxChannelAlias.h"
-#include "DcxImageFormat.h"
 
 #include <OpenEXR/ImathBox.h>
 
