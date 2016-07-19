@@ -2,11 +2,33 @@
                                OpenDCX
 ========================================================================
 
-OpenDCX is an open-source C++ library comprising extensions for the 
-OpenEXR library and its deep file format. It adds support for per
-deep-sample metadata adding subpixel-masks and surface-type flags,
-and provides utility functions to manipulate deep pixels with this
-metadata.
+
+opendcx_examples is a collection of C++ example commands that use the
+OpenDCX API to illustrate common tasks.
+
+    readDeepPixelExample.cpp:
+        A simple command that reads an input deep pixel and prints
+        information about its samples (DeepSegments) including the
+        subpixel mask patterns.
+        Illustrates a simple use of the DeepPixel class.
+
+    deepTransformExample.cpp:
+        A command which applies a 2D affine transform to all deep pixels with
+        subpixel mask resampling. It illustrates use of the DeepTransform
+        class.
+
+    microPolyAccumulator.cpp, microPolyAccumulator.h:
+        Example sample collapsing (accumulate) code for a micropolygon
+        renderer. This does not compile into a standalone command and
+        is included for reference purposes.
+
+    raySampleAccumulatorExample.cpp:
+        A command that converts input deep pixels into spheres which are
+        then ray traced producing output deep pixels. An simple example
+        of collapsing (accumulating) subpixel ray intersections together
+        to form a single output deep sample with an accumulated subpixel
+        mask.
+
 
 For more details visit the project's home page:
 www.opendcx.org
