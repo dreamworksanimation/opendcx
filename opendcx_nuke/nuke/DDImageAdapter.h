@@ -73,12 +73,12 @@ dcxChannelSet (const DD::Image::ChannelSet& in);
 
 
 //
-// Convert a DD::Image::ChannelSet to a Dcx::ChannelAliasSet.
+// Convert a DD::Image::ChannelSet to a Dcx::ChannelAliasPtrSet.
 //
 
 DCX_EXPORT
-Dcx::ChannelAliasSet
-dcxChannelAliasSet (const DD::Image::ChannelSet& in);
+Dcx::ChannelAliasPtrSet
+dcxChannelAliasPtrSet (const DD::Image::ChannelSet& in);
 
 
 //
@@ -184,20 +184,12 @@ class DDImageDeepPlane : public Dcx::DeepTile
 
     /*virtual*/ bool getDeepPixel (int x,
                                    int y,
-                                   Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug=false
-#endif
-                                   ) const;
+                                   Dcx::DeepPixel& pixel) const;
 
     /*virtual*/ bool getSampleMetadata (int x,
                                         int y,
                                         size_t sample,
-                                        Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                        , bool debug=false
-#endif
-                                        ) const;
+                                        Dcx::DeepMetadata& metadata) const;
 
 
   protected:
@@ -242,20 +234,12 @@ class DDImageDeepInputPlane : public DDImageDeepPlane
 
     /*virtual*/ bool getDeepPixel (int x,
                                    int y,
-                                   Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug=false
-#endif
-                                   ) const;
+                                   Dcx::DeepPixel& pixel) const;
 
     /*virtual*/ bool getSampleMetadata (int x,
                                         int y,
                                         size_t sample,
-                                        Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                        , bool debug=false
-#endif
-                                        ) const;
+                                        Dcx::DeepMetadata& metadata) const;
 
 
   protected:
@@ -297,20 +281,12 @@ class DDImageDeepOutputPlane : public DDImageDeepPlane
 
     /*virtual*/ bool getDeepPixel (int x,
                                    int y,
-                                   Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug=false
-#endif
-                                   ) const;
+                                   Dcx::DeepPixel& pixel) const;
 
     /*virtual*/ bool getSampleMetadata (int x,
                                         int y,
                                         size_t sample,
-                                        Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                        , bool debug=false
-#endif
-                                        ) const;
+                                        Dcx::DeepMetadata& metadata) const;
 
 
     //
@@ -320,11 +296,7 @@ class DDImageDeepOutputPlane : public DDImageDeepPlane
 
     /*virtual*/ bool setDeepPixel (int,/*x ignored*/
                                    int,/*y ignored*/
-                                   const Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug=false
-#endif
-                                   );
+                                   const Dcx::DeepPixel& pixel);
 
     //
     // Writes an empty DeepPixel (0 samples) to the DeepOutputPlane.
@@ -332,11 +304,7 @@ class DDImageDeepOutputPlane : public DDImageDeepPlane
     //
 
     /*virtual*/ bool clearDeepPixel (int,/*x ignored*/
-                                     int /*y ignored*/
-#ifdef DCX_DEBUG_DEEPTILE
-                                     , bool debug=false
-#endif
-                                     );
+                                     int /*y ignored*/);
 
 
   protected:

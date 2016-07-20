@@ -86,6 +86,13 @@ class DCX_EXPORT Pixel
   public:
 
     //-------------------------------------------------
+    // Channel mask is empty, leaves junk in channels
+    //-------------------------------------------------
+
+    Pixel ();
+
+
+    //-------------------------------------------------
     // Assigns channel mask but leaves junk in channels
     //-------------------------------------------------
 
@@ -207,6 +214,8 @@ typedef Pixel<double>   Pixeld;
 // Inline Functions
 //-----------------
 
+template <class T>
+inline Pixel<T>::Pixel() {}
 template <class T>
 inline Pixel<T>::Pixel(const ChannelSet& set) : channels(set) {}
 template <class T>

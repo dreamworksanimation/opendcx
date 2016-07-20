@@ -40,11 +40,15 @@
 #include <assert.h>
 #include <algorithm> // for std::sort in some compilers
 
+// Uncomment this to get loads of info from flattener:
+//#define DCX_DEBUG_FLATTENER 1
+
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
 
 #define SEGMENT_SAMPLE_STEPS 5
 //#define SEGMENT_SAMPLE_STEPS 15
+
 
 // Maxium absorbance is what we consider an opaque surface.
 // For this we are using an alpha of 0.999999999999
@@ -514,11 +518,7 @@ DeepPixel::isLegacyDeepPixel ()
 void
 DeepPixel::flatten (const ChannelSet& out_channels,
                     Pixelf& out,
-                    InterpolationMode interpolation
-#ifdef DCX_DEBUG_FLATTENER
-                    , bool debug
-#endif
-                    )
+                    InterpolationMode interpolation)
 {
     const bool has_overlaps = hasOverlaps();
 #ifdef DCX_DEBUG_FLATTENER
@@ -658,11 +658,7 @@ void
 DeepPixel::flattenSubpixels (const ChannelSet& out_channels,
                              Pixelf& out,
                              const SpMask8& spmask,
-                             InterpolationMode interpolation
-#ifdef DCX_DEBUG_FLATTENER
-                             , bool debug
-#endif
-                             )
+                             InterpolationMode interpolation)
 {
     // Must update the overlap state for each bin individually.  This returns
     // fast if global full coverage is on:
@@ -708,11 +704,7 @@ DeepPixel::flattenSubpixels (const ChannelSet& out_channels,
 void
 DeepPixel::flattenNoOverlaps (const ChannelSet& out_channels,
                               Pixelf& out,
-                              const SpMask8& spmask
-#ifdef DCX_DEBUG_FLATTENER
-                              , bool debug
-#endif
-                              )
+                              const SpMask8& spmask)
 {
     out.erase(out_channels);
     // Always fill in these output channels even though they may not be enabled
@@ -936,11 +928,7 @@ struct Edge
 void
 DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
                                const SpMask8& spmask,
-                               InterpolationMode interpolation
-#ifdef DCX_DEBUG_FLATTENER
-                               , bool debug
-#endif
-                               )
+                               InterpolationMode interpolation)
 {
     out.erase(out_channels);
     // Always fill in these output channels even though they may not be enabled

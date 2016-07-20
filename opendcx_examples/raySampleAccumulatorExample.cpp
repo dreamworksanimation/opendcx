@@ -39,7 +39,13 @@
 //
 //  raySampleAccumulatorExample
 //
+//      Example that converts input deep pixels into sphere primitives
+//      which are ray traced multiple times at each output pixel producing
+//      deep pixels with subpixel masks.
 //
+//      A simple example of collapsing (accumulating) subpixel ray
+//      intersections together to form a single output deep sample with
+//      an accumulated subpixel mask.
 //
 
 
@@ -47,19 +53,14 @@
 #include <OpenEXR/ImfDeepImageIO.h>
 #include <OpenEXR/ImathMatrix.h>
 
+#include <OpenDCX/DcxChannelContext.h>
 #include <OpenDCX/DcxDeepImageTile.h>
 #include <OpenDCX/DcxDeepTransform.h>  // for radians()
 
+#include <stdlib.h>
 
-#define DEBUG_TRACER 1
-#ifdef DEBUG_TRACER
-# define SAMPLER_X 355
-# define SAMPLER_Y 84
-# define SAMPLINGXY(A, B) (A==SAMPLER_X && B==SAMPLER_Y)
-# define SAMPLINGXYZ(A, B, C) (A==SAMPLER_X && B==SAMPLER_Y && C==SAMPLER_Z)
-# define SAMPLING_X(A) (A==SAMPLER_X)
-# define SAMPLING_Y(A) (A==SAMPLER_Y)
-# define SAMPLING_Z(A) (A==SAMPLER_Z)
+#ifdef DEBUG
+#  include <assert.h>
 #endif
 
 //-------------------------------------------------------------------------
@@ -207,7 +208,7 @@ typedef std::vector<DeepIntersection> DeepIntersectionList;
 
 // List of same-surface DeepIntersection indices
 typedef std::vector<size_t> DeepSurfaceIntersectionList;
-typedef std::map<SurfaceID, DeepSurfaceIntersectionList> DeepIntersectionMap;
+typedef std::map<SurfaceID, DeepSurfaceIntersectionList> DeepSurfaceIntersectionMap;
 
 //-------------------------------------------------------------------------
 //-------------------------------------------------------------------------
@@ -223,13 +224,20 @@ usageMessage (const char argv0[], bool verbose=false)
                 "Print info about a deep pixel or line of deep pixels\n"
                 "\n"
                 "Options:\n"
-                "  -skip <n>       read every nth input pixel when creating spheres\n"
-                "  -scale <v>      scale the sphere radius by this\n"
-                "  -sp <v>         subpixel sampling rate\n"
-                "  -spX <x>        X subpixel sampling rate\n"
-                "  -spY <y>        Y subpixel sampling rate\n"
-                "  -zthresh <v>    Z distance threshold for combining samples\n"
+                "  -skip <n>       read every nth input pixel when creating spheres (default 8)\n"
+                "  -scale <v>      globally scale of sphere radius (default 40.0)\n"
                 "\n"
+                "  -sp <v>         xy subpixel sampling rate (default 16)\n"
+                "  -spX <x>        x subpixel sampling rate (default 16)\n"
+                "  -spY <y>        y subpixel sampling rate (default 16)\n"
+                "  -zthresh <v>    z-distance threshold for combining samples\n"
+                "\n"
+                "  -camt <x><y><z> camera translation (default input image w/2,h/2,w)\n"
+                "  -camr <x><y><z> camera rotation (default 0,0,0)\n"
+                "  -camfl <v>      camera focal-length (default 50.0)\n"
+                "  -camha <v>      camera horizontal aperture (default 24.0)\n"
+                "\n"
+                "  -v              print additional info\n"
                 "  -h              prints this message\n";
 
          std::cerr << std::endl;
@@ -247,9 +255,18 @@ main (int argc, char *argv[])
 
     int   skipPixel = 8;
     float scaleSpheres = 40.0f;
+    //
     int   subpixelXRate = 16;
     int   subpixelYRate = 16;
     float deepCombineZThreshold = 1.0f;
+    //
+    bool  centerCam = true;
+    float camTx=0.0f, camTy=0.0f, camTz=0.0f;
+    float camRx=0.0f, camRy=0.0f, camRz=0.0f;
+    float camFocal = 50.0f;
+    float camHaper = 24.0f;
+    //
+    bool  verbose = false;
 
     //
     // Parse the command line.
@@ -311,6 +328,51 @@ main (int argc, char *argv[])
                 deepCombineZThreshold = fabs(strtol(argv[i + 1], 0, 0));
                 i += 2;
             }
+            else if (!strcmp(argv[i], "-camt"))
+            {
+                // Camera translation:
+                if (i > argc - 4)
+                    usageMessage(argv[0]);
+                camTx = strtol(argv[i + 1], 0, 0);
+                camTy = strtol(argv[i + 2], 0, 0);
+                camTz = strtol(argv[i + 3], 0, 0);
+                centerCam = false;
+                i += 4;
+            }
+            else if (!strcmp(argv[i], "-camr"))
+            {
+                // Camera rotation:
+                if (i > argc - 4)
+                    usageMessage(argv[0]);
+                camRx = strtol(argv[i + 1], 0, 0);
+                camRy = strtol(argv[i + 2], 0, 0);
+                camRz = strtol(argv[i + 3], 0, 0);
+                i += 4;
+            }
+            else if (!strcmp(argv[i], "-camfl"))
+            {
+                // Camera focal-length:
+                if (i > argc - 2)
+                    usageMessage(argv[0]);
+                camFocal = fabs(strtol(argv[i + 1], 0, 0));
+                i += 2;
+            }
+            else if (!strcmp(argv[i], "-camha"))
+            {
+                // Camera horiz-aperture:
+                if (i > argc - 2)
+                    usageMessage(argv[0]);
+                camHaper = fabs(strtol(argv[i + 1], 0, 0));
+                i += 2;
+            }
+            else if (!strcmp(argv[i], "-v"))
+            {
+                // Verbose mode:
+                if (i > argc - 1)
+                    usageMessage(argv[0]);
+                verbose = true;
+                i += 1;
+            }
             else if (!strcmp(argv[i], "-h"))
             {
                 // Print help message:
@@ -338,7 +400,7 @@ main (int argc, char *argv[])
 
     int exitStatus = 0;
 
-    Dcx::ChannelContext channelCtx; // stores shared channel aliases
+    Dcx::ChannelContext chanCtx; // stores shared channel aliases
 
     try
     {
@@ -347,11 +409,14 @@ main (int argc, char *argv[])
         Imf::loadDeepScanLineImage(std::string(inFile), inHeader, inDeepImage);
 
         // Dcx::DeepTile stores the ChannelSet along with the channel ptrs:
-        Dcx::DeepImageInputTile inDeepTile(inHeader, inDeepImage, channelCtx, true/*Yup*/);
+        Dcx::DeepImageInputTile inDeepTile(inHeader, inDeepImage, chanCtx, true/*Yup*/);
 
-        //std::cout << "reading file '" << inFile << "'" << std::endl;
-        //std::cout << " in_bbox" << inDeepTile.dataWindow() << std::endl;
-        //inDeepTile.channels().print("channels=", std::cout, channelCtx); std::cout << std::endl;
+        if (verbose)
+        {
+            std::cout << "reading file '" << inFile << "'" << std::endl;
+            std::cout << "  in bbox" << inDeepTile.dataWindow() << std::endl;
+            inDeepTile.channels().print("  in channels=", std::cout, &chanCtx); std::cout << std::endl;
+        }
 
         // Output tile is copy of in tile.
         // This is for convenience, the output image can be completely
@@ -359,14 +424,22 @@ main (int argc, char *argv[])
         Dcx::DeepImageOutputTile outDeepTile(inDeepTile);
         outDeepTile.setOutputFile(outFile, Imf::INCREASING_Y/*lineOrder*/);
 
+        // If camera translation not specified, move to output image w/2,h/2,w:
+        if (centerCam)
+        {
+            camTx = outDeepTile.w()/2.0f + 0.5f;
+            camTy = outDeepTile.h()/2.0f + 0.5f;
+            camTz = float(outDeepTile.w());
+        }
+
         //--------------------------------------------------------------------------
 
-        MyCamera cam(Imath::V3f(outDeepTile.w()/2.0f + 0.5f,
-                                outDeepTile.h()/2.0f + 0.5f,
-                                float(outDeepTile.w()))/*translate*/,
-                     Imath::V3f(0.0f, 0.0f, 0.0f)/*rotate*/,
-                     50.0f/*focalLength*/, 24.0f/*hAperture*/,
-                     inDeepTile.displayWindow(), 1.0f/*pixel_aspect*/);
+        MyCamera cam(Imath::V3f(camTx, camTy, camTz)/*translate*/,
+                     Imath::V3f(camRx, camRy, camRz)/*rotate*/,
+                     camFocal/*focalLength*/,
+                     camHaper/*hAperture*/,
+                     inDeepTile.displayWindow(),
+                     1.0f/*pixel_aspect*/);
 
         // Make a bunch of spheres to intersect:
         std::vector<MySphere> pixelSpheres;
@@ -401,57 +474,43 @@ main (int argc, char *argv[])
                 maxSamples = std::max(maxSamples, (int)nSamples);
             }
         }
-        //std::cout << "spheres=" << pixelSpheres.size() << ", maxSamples=" << maxSamples << std::endl;
+        if (verbose)
+            std::cout << "raytracing " << pixelSpheres.size() << " spheres for " << outDeepTile.h() << " output lines" << std::endl;
 
-        //--------------------------------------------------------------------------
+        // Output DeepPixel reused at each pixel:
+        Dcx::DeepPixel outDeepPixel(shaderChannels);
+        outDeepPixel.reserve(10);
+
         // Temp list of intersections, reused at each subpixel:
         DeepIntersectionList deepIntersectionList;
         deepIntersectionList.reserve(20);
+
         // The accumulated list of intersections for the whole pixel:
         DeepIntersectionList deepAccumIntersectionList;
         deepAccumIntersectionList.reserve(maxSamples);
-        // Map of unique prim intersections for this pixel:
-        DeepIntersectionMap deepIntersectionMap;
-        //--------------------------------------------------------------------------
 
-        // Resued at each pixel:
-        Dcx::DeepPixel outDeepPixel(shaderChannels);
-        outDeepPixel.reserve(10);
-        Dcx::DeepSegment outDs;
-        Dcx::Pixelf outDp(outDeepPixel.channels());
-
-#if 0//def DEBUG_TRACER
-#else
-        std::cout << "raytracing " << pixelSpheres.size() << " spheres for " << outDeepTile.h() << " lines:" << std::endl;
-#endif
+        // Map of unique prim intersections:
+        DeepSurfaceIntersectionMap deepSurfaceIntersectionMap;
 
         for (int outY=outDeepTile.y(); outY <= outDeepTile.t(); ++outY)
         {
-#if 0//def DEBUG_TRACER
-#else
-            std::cout << "  line " << outY << std::endl;
-#endif
+            if (verbose)
+                std::cout << "  line " << outY << std::endl;
             for (int outX=outDeepTile.x(); outX <= outDeepTile.r(); ++outX)
             {
-#if 0//def DEBUG_TRACER
-                const bool debug = (SAMPLINGXY(outX, outY));
-                if (!debug)
-                {
-                    outDeepTile.clearDeepPixel(outX, outY);
-                    continue;
-                }
-                std::cout << outX << "," << outY << ":" << std::endl;
-#endif
-
+                outDeepPixel.clear();
                 deepAccumIntersectionList.clear();
-                deepIntersectionMap.clear();
+                deepSurfaceIntersectionMap.clear();
 
                 for (int sy=0; sy < subpixelYRate; ++sy)
                 {
-                    const float sdy = (float(sy)/float(subpixelYRate - 1));
+                    // Subpixel x offset:
+                    const float sdy = float(sy)/float(subpixelYRate - 1);
+
                     for (int sx=0; sx < subpixelXRate; ++sx)
                     {
-                        const float sdx = (float(sx)/float(subpixelXRate - 1));
+                        // Subpixel y offset:
+                        const float sdx = float(sx)/float(subpixelXRate - 1);
 
                         // Build output spmask for this subpixel:
                         Dcx::SpMask8 outSpMask = Dcx::SpMask8::allBitsOff;
@@ -459,11 +518,10 @@ main (int argc, char *argv[])
                         Dcx::SpMask8::mapXCoord(sx, subpixelXRate, outSpX, outSpR);
                         Dcx::SpMask8::mapYCoord(sy, subpixelYRate, outSpY, outSpT);
                         outSpMask.setSubpixels(outSpX, outSpY, outSpR, outSpT);
-#if 0//def DEBUG_TRACER
-                        outSpMask.printPattern(std::cout, "  ");
-#endif
+                        //outSpMask.printPattern(std::cout, "  ");
 
-                        // Build a ray with this subpixel offset:
+                        // Build a ray at this subpixel offset.
+                        // (this offset would normally include stochastic jitter)
                         MyRay R;
                         cam.buildRay(float(outX)+sdx,
                                      float(outY)+sdy, R);
@@ -473,9 +531,6 @@ main (int argc, char *argv[])
                         // Naively intersect the ray with all the spheres - obviously
                         // in practice this would use an acceleration structure:
                         const size_t nSpheres = pixelSpheres.size();
-#if 0//def DEBUG_TRACER
-                        std::cout << "  " << sx << "," << sy << ": ray-tracing against " << nSpheres << " spheres" << std::endl;
-#endif
                         for (size_t i=0; i < nSpheres; ++i)
                         {
                             const MySphere& sphere = pixelSpheres[i];
@@ -483,9 +538,6 @@ main (int argc, char *argv[])
                             Imath::V3f P, N;
                             if (sphere.intersect(R, tmin, tmax, P, N))
                             {
-#if 0//def DEBUG_TRACER
-                                std::cout << "  " << sx << "," << sy << ": hit! sphere ID#" << sphere.surfID << std::endl;
-#endif
                                 bool addIt = true;
                                 {
                                     //
@@ -518,7 +570,9 @@ main (int argc, char *argv[])
                         for (size_t i=0; i < nIntersections; ++i)
                         {
                             DeepIntersection& I = deepIntersectionList[i];
+#ifdef DEBUG
                             assert(I.primPtr);
+#endif
 
                             // We only understand spheres in this example...:
                             if (I.primType != PRIMTYPE_SPHERE)
@@ -527,20 +581,16 @@ main (int argc, char *argv[])
 
                             // Has the sphere's surface ID been intersected before for
                             // this subpixel?
-                            DeepIntersectionMap::iterator it = deepIntersectionMap.find(sphere->surfID);
-                            if (it == deepIntersectionMap.end())
+                            DeepSurfaceIntersectionMap::iterator it = deepSurfaceIntersectionMap.find(sphere->surfID);
+                            if (it == deepSurfaceIntersectionMap.end())
                             {
-                               // Not in map yet, add intersection to the accumulate list:
-                               deepAccumIntersectionList.push_back(I);
-                               const size_t accumIndex = deepAccumIntersectionList.size()-1;
-                               DeepSurfaceIntersectionList dsl;
-                               dsl.reserve(10);
-                               dsl.push_back(accumIndex);
-                               deepIntersectionMap[sphere->surfID] = dsl;
-#if 0//def DEBUG_TRACER
-                               if (debug)
-                                   std::cout << "      new surface, adding to map" << std::endl;
-#endif
+                                // Not in map yet, add intersection to the accumulate list:
+                                deepAccumIntersectionList.push_back(I);
+                                const size_t accumIndex = deepAccumIntersectionList.size()-1;
+                                DeepSurfaceIntersectionList dsl;
+                                dsl.reserve(10);
+                                dsl.push_back(accumIndex);
+                                deepSurfaceIntersectionMap[sphere->surfID] = dsl;
                                 continue;
                             }
 
@@ -569,12 +619,6 @@ main (int argc, char *argv[])
                                 const float eMinZ = matchedI.tmin - deepCombineZThreshold;
                                 const float eMaxZ = matchedI.tmax + deepCombineZThreshold;
                                 const float eN = I.N.dot(matchedI.N);
-#if 0//def DEBUG_TRACER
-                                if (debug) {
-                                    std::cout << "    minZ=" << matchedI.tmin << ", maxZ=" << matchedI.tmax << std::endl;
-                                    std::cout << "    eMinZ=" << eMinZ << ", eMaxZ=" << eMaxZ << ", eN=" << eN << std::endl;
-                                }
-#endif
                                 if (I.tmin < eMinZ || I.tmin > eMaxZ || eN < 0.5f)
                                     continue; // no match, skip to next
 
@@ -585,12 +629,6 @@ main (int argc, char *argv[])
                                 matchedI.color  += I.color; // Add colors together
                                 matchedI.spmask |= I.spmask; // Or the subpixel masks together
                                 matchedI.count  += 1; // Increase combined count
-#if 0//def DEBUG_TRACER
-                                if (debug) {
-                                    std::cout << "      combine with prev, minZ=" << matchedI.tmin << " maxZ=" << matchedI.tmax << std::endl;
-                                    matchedI.spmask.printPattern(std::cout, "      ");
-                                }
-#endif
                                 match = true;
                                 break;
                             }
@@ -603,19 +641,7 @@ main (int argc, char *argv[])
                                 deepAccumIntersectionList.push_back(I);
                                 const size_t accumIndex = deepAccumIntersectionList.size()-1;
                                 dsl.push_back(accumIndex);
-#if 0//def DEBUG_TRACER
-                                if (debug)
-                                    std::cout << "      surfaceID match, but intersections too different, add to surface's list" << std::endl;
-#endif
                             }
-#if 0//def DEBUG_TRACER
-                            if (debug) {
-                               std::cout << "      nDeepIntersections=" << nIntersections;
-                               std::cout << ", nCurrentSurfaces=" << nCurrentSurfaces;
-                               std::cout << ", dsl.size()=" << dsl.size();
-                               std::cout << std::endl;
-                            }
-#endif
 
                         } // nIntersections loop
 
@@ -630,32 +656,30 @@ main (int argc, char *argv[])
                     continue;
                 }
 
-                outDeepPixel.clear();
                 outDeepPixel.reserve(nIntersections);
 
+                // Build an output DeepSegment for each combined intersection:
                 for (size_t i=0; i < nIntersections; ++i)
                 {
-                    // Build an output DeepSegment for each combined intersection:
                     const DeepIntersection& I = deepAccumIntersectionList[i];
-                    outDs.Zf = float(I.tmin);
-                    outDs.Zb = float(I.tmax);
-                    outDs.index = -1; // gets assigned when appended to DeepPixel
-                    outDs.metadata.spmask = I.spmask;
-                    outDs.metadata.flags = Dcx::DEEP_LINEAR_INTERP_SAMPLE; // always hard surfaces for this example
-                    const size_t dsIndex = outDeepPixel.append(outDs); // add DeepSegment and get index to it
-                    // Copy color to DeepSegment's pixel:
+                    Dcx::DeepSegment ds;
+                    ds.Zf    = float(I.tmin);
+                    ds.Zb    = float(I.tmax);
+                    ds.index = -1; // gets assigned when appended to DeepPixel below
+                    ds.metadata.spmask = I.spmask;
+                    ds.metadata.flags  = Dcx::DEEP_LINEAR_INTERP_SAMPLE; // always hard surfaces for this example
+
+                    // Append to DeepPixel and retrieve assigned index:
+                    const size_t dsIndex = outDeepPixel.append(ds);
+
+                    // Copy shaded color to DeepSegment's pixel:
                     Dcx::Pixelf& dp = outDeepPixel.getSegmentPixel(dsIndex);
                     int c = 0;
                     foreach_channel(z, Dcx::Mask_RGBA)
-                    {
                         dp[z] = I.color[c++] / float(I.count);
-                    }
                 }
+                //outDeepPixel.printInfo(std::cout, "outDeepPixel=");
 
-#if 0//def DEBUG_TRACER
-                if (debug)
-                    outDeepPixel.printInfo(std::cout, "outDeepPixel=");
-#endif
                 outDeepTile.setDeepPixel(outX, outY, outDeepPixel);
 
 
@@ -665,6 +689,11 @@ main (int argc, char *argv[])
             outDeepTile.writeScanline(outY, true/*flush-line*/);
 
         } // outY loop
+
+        // If all lines are flushed on write the tile should be using zero bytes
+        // by end:
+        if (verbose)
+            std::cout << "  out_tile bytes=" << outDeepTile.bytesUsed() << std::endl;
 
     }
     catch (const std::exception &e)

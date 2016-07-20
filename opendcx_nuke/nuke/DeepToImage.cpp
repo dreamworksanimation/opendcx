@@ -60,7 +60,6 @@ static const char* interpolation_modes[] = { "off", "auto", "log", "lin", 0 };
 
 /*! Example Deep flattener Nuke plugin which supports subpixel masks and
     sample flags.
-    TODO: add support for 16x16 masks!
 */
 class DeepToImage : public DD::Image::Iop {
     bool                    k_one_over_z;           //!< Output 1/Z or Z
@@ -412,15 +411,12 @@ public:
                         // Add flattended subpixel to accumulation pixel:
                         dcx_accum += dcx_flattened;
 
-#if 1
                         dcx_accum[Dcx::Chan_ZFront] = std::min(dcx_accum[Dcx::Chan_ZFront], dcx_flattened[Dcx::Chan_ZFront]);
-                        // This causes gcc to crash...specifically writing to Chan_ZBack, or index 12...
+#if 0
+                        // TODO: This causes gcc to crash...specifically writing to Chan_ZBack, or index 12...
                         // 11 is fine, 13 is fine, only 12 crashes...what the heck...?
                         //dcx_accum[12] = dcx_accum[Dcx::Chan_ZFront];
                         //dcx_accum[Dcx::Chan_ZBack] = dcx_accum[Dcx::Chan_ZFront];
-#else
-                        dcx_accum[Dcx::Chan_Z     ] = std::min(dcx_accum[Dcx::Chan_Z     ], dcx_flattened[Dcx::Chan_Z     ]);
-                        dcx_accum[Dcx::Chan_ZFront] = std::min(dcx_accum[Dcx::Chan_ZFront], dcx_flattened[Dcx::Chan_ZFront]);
                         dcx_accum[Dcx::Chan_ZBack ] = std::min(dcx_accum[Dcx::Chan_ZBack ], dcx_flattened[Dcx::Chan_ZBack ]);
 #endif
                         dcx_accum[Dcx::Chan_CutoutZ] = std::min(dcx_flattened[Dcx::Chan_CutoutZ], dcx_accum[Dcx::Chan_CutoutZ]);

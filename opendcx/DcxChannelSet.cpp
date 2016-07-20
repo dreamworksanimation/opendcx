@@ -36,6 +36,7 @@
 /// @file DcxChannelSet.cpp
 
 #include "DcxChannelAlias.h"
+#include "DcxChannelContext.h"
 #include "DcxChannelSet.h"
 #include "DcxChannelDefs.h"
 
@@ -49,8 +50,9 @@ OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 //-----------------------------------------------------------------------------
 
 // This should be in IlmImf somewhere...
+inline
 const char*
-pixelTypeString(OPENEXR_IMF_NAMESPACE::PixelType type)
+pixelTypeString (OPENEXR_IMF_NAMESPACE::PixelType type)
 {
     switch (type)
     {
@@ -60,7 +62,6 @@ pixelTypeString(OPENEXR_IMF_NAMESPACE::PixelType type)
     default: return "invalid";
     }
 }
-
 
 //
 // Split a string up based on a delimiter list.
@@ -156,20 +157,23 @@ struct StandardChannel
     ChannelIdx      ordering_index;         // Index used to determine channel order (R before G, G before A)
 };
 
-// ***********************************************************
-// ***                                                    ****
-// ***        KEEP THIS IN SYNC WITH ChannelDefs.h!       ****
-// ***        There should be one entry for each          ****
-// ***        ChannelIdx 'Chan_*' definition.             ****
-// ***                                                    ****
-// *** See OpenEXR TechnicalIntroduction.pdf, pages 19-20 ****
-// ***                                                    ****
-// ***********************************************************
+//
+// **************************************************************
+// *                                                            *
+// *        KEEP THIS TABLE IN SYNC WITH ChannelDefs.h!         *
+// *         There should be one entry for each unique          *
+// *            ChannelIdx 'Chan_*' definition.                 *
+// *                                                            *
+// *     See OpenEXR TechnicalIntroduction.pdf, pages 19-20     *
+// *                                                            *
+// **************************************************************
+//
 static StandardChannel g_standard_channel_table[] =
 {
     {"invalid",  "invalid",  "",          "",             Imf::HALF,      Chan_Invalid }, // 0 (Chan_Invalid)
     //
     //<usr layer> <usr chan> <match list> <dflt I/O name> <dflt I/O type> <ordering index>
+    //
     { "rgba",    "R",        "R,RED",     "R",            Imf::HALF,      Chan_R         }, // 1
     { "rgba",    "G",        "G,GREEN",   "G",            Imf::HALF,      Chan_G         }, // 2
     { "rgba",    "B",        "B,BLUE",    "B",            Imf::HALF,      Chan_B         }, // 3
@@ -186,6 +190,8 @@ static StandardChannel g_standard_channel_table[] =
     { "depth",   "Z",        "Z",         "Z",            Imf::FLOAT,     Chan_Z         }, // 11
     { "depth",   "ZFront",   "ZF,ZFRONT", "",             Imf::FLOAT,     Chan_ZFront    }, // 12 - placeholder! (TODO: ditch 'ZFront' completely and just use 'Z'...?)
     { "depth",   "ZBack",    "ZB,ZBACK",  "ZBack",        Imf::FLOAT,     Chan_ZBack     }, // 13
+    //
+    // These are additional common channel types:
     //
     { "spmask",  "flags",    "FLAGS,3",   "spmask.flags", Imf::HALF,      Chan_DeepFlags }, // 14 - translate spmask.3 to spmask.flags for bkwd-compat
     { "spmask",  "1",        "1",         "spmask.1",     Imf::FLOAT,     Chan_SpBits1   }, // 15
@@ -219,7 +225,7 @@ static std::map<std::string, StandardChannel*> g_standard_channel_matching_map;
 
 
 //
-// Initializes standard-channel matching string map
+// Initializes a map of standard-channel matching strings
 //
 
 struct BuildStandardChannels
@@ -228,16 +234,15 @@ struct BuildStandardChannels
     {
         for (StandardChannel* c=g_standard_channel_table; c->layer_name; ++c)
         {
-            if (c->match_list || c->match_list[0] != 0)
+            if (!c->match_list || !c->match_list[0])
+                continue;
+            std::vector<std::string> tokens;
+            split(std::string(c->match_list), ",", tokens);
+            for (size_t i=0; i < tokens.size(); ++i)
             {
-                std::vector<std::string> tokens;
-                split(std::string(c->match_list), ",", tokens);
-                for (size_t i=0; i < tokens.size(); ++i)
-                {
-                    strip(tokens[i]); // remove whitespace
-                    if (!tokens[i].empty())
-                        g_standard_channel_matching_map[tokens[i]] = c;
-                }
+                strip(tokens[i]); // remove whitespace
+                if (!tokens[i].empty())
+                    g_standard_channel_matching_map[tokens[i]] = c;
             }
         }
     }
@@ -310,6 +315,39 @@ matchStandardChannel (const char*     channel_name,
 }
 
 
+//
+// If the kind of channel is one of the predefined ones, return
+// the common position that channel occupies in a layer.
+// This allows channel names to 
+// i.e.
+//      if kind==Chan_R -> rgba position 0
+//      if kind==Chan_A -> rgba position 3
+//
+
+int
+getLayerPositionFromKind (ChannelIdx kind)
+{
+    if (kind <= Chan_Invalid || kind >= Chan_ArbitraryStart)
+        return 0; // no idea
+
+    // Determine layer position from kind.
+    if      (kind <= Chan_A)          return kind - Chan_R;   // rgba
+    else if (kind <= Chan_AB)         return kind - Chan_AR;  // opacity
+    else if (kind <= Chan_BY)         return kind - Chan_RY;  // yuv
+    else if (kind == Chan_Z || kind == Chan_ZFront) return 0; // depth
+    else if (kind == Chan_ZBack)      return 1;               // depth
+    else if (kind <= Chan_SpBitsLast) return kind - Chan_DeepFlags; // spmask
+    else if (kind <= Chan_UvQ)        return kind - Chan_UvS; // tex
+#if 0
+    // TODO: how to handle more obscure layers?
+    else if (kind <= Chan_ID3)        return kind - Chan_ID0; // id
+    else if (kind <= Chan_CutoutZ)    return kind - Chan_CutoutA; // cutout
+#endif
+
+    return 0;
+}
+
+
 //-----------------------------------------------------------------------------
 //
 //    class ChannelSet
@@ -322,24 +360,23 @@ matchStandardChannel (const char*     channel_name,
 /*static*/ ChannelIdxSet ChannelSet::m_npos;
 
 
-#if 0
 /*friend*/
 std::ostream&
 operator << (std::ostream& os,
              const ChannelSet::iterator& it)
 {
-    printChannelName(os, it.channel());
-    return os;
+    return os << it.channel();
 }
-#endif
 
 //
-// Print channel or layer.channel name to output stream
+// Print channel or layer.channel name to output stream.
+// If the ChannelContext is NULL only the ChannelIdx number will be
+// printed, otherwise the channel names will.
 //
 
 void ChannelSet::print (const char* prefix,
                         std::ostream& os,
-                        const ChannelContext& ctx) const
+                        const ChannelContext* ctx) const
 {
     if (prefix && prefix[0])
         os << prefix;
@@ -347,7 +384,10 @@ void ChannelSet::print (const char* prefix,
     if (m_mask.size() == 0)
         os << "none";
     else if (m_mask.size() == 1)
-        ctx.printChannelFullName(os, *m_mask.begin());
+        if (ctx)
+            ctx->printChannelFullName(os, *m_mask.begin());
+        else
+            os << *m_mask.begin();
     else
     {
         int i = 0;
@@ -355,11 +395,28 @@ void ChannelSet::print (const char* prefix,
         {
             if (i++ > 0)
                 os << ",";
-            ctx.printChannelFullName(os, *z);
+            if (ctx)
+                ctx->printChannelFullName(os, *z);
+            else
+                os << *z;
         }
     }
     os << "]";
 }
+
+//
+// Outputs the ChannelIdx number of the channels to the stream
+//
+
+/*friend*/
+std::ostream&
+operator << (std::ostream& os,
+             const ChannelSet& b)
+{
+    b.print(NULL/*prefix*/, os, NULL/*ChannelContext*/);
+    return os;
+}
+
 
 //-----------------------------------------------------------------------------
 //
@@ -367,26 +424,23 @@ void ChannelSet::print (const char* prefix,
 //
 //-----------------------------------------------------------------------------
 
-ChannelAlias::ChannelAlias (const char* name,
-                            const char* layer,
-                            ChannelIdx channel,
-                            const char* io_name,
-                            Imf::PixelType io_type,
-                            ChannelIdx kind) :
+ChannelAlias::ChannelAlias (const char*    name,
+                            const char*    layer,
+                            ChannelIdx     channel,
+                            uint32_t       position,
+                            const char*    io_name,
+                            Imf::PixelType io_type) :
     m_name(name),
     m_layer(layer),
     //
     m_channel(channel),
-    m_kind(kind),
-    m_position(0),
+    m_position(position),
     //
     m_io_name(io_name),
     m_io_type(io_type)
+    //m_io_part(io_part)
 {
-    if (kind != Chan_Invalid)
-    {
-        // TODO: determine layer position from m_kind
-    }
+    //
 }
 
 
@@ -402,10 +456,10 @@ ChannelAlias& ChannelAlias::operator = (const ChannelAlias& b)
     m_name     = b.m_name;
     m_layer    = b.m_layer;
     m_channel  = b.m_channel;
-    m_kind     = b.m_kind;
     m_position = b.m_position;
     m_io_name  = b.m_io_name;
     m_io_type  = b.m_io_type;
+    //m_io_part  = b.m_io_part;
     return *this;
 }
 
@@ -446,7 +500,7 @@ ChannelAlias::operator == (const ChannelAlias& b) const
 }
 
 //
-// Output the name of the channel to the stream
+// Output the full name of the channel to the stream
 //
 
 /*friend*/
@@ -470,26 +524,11 @@ operator << (std::ostream& os,
 // Initializes to set of standard channels.
 //
 
-ChannelContext::ChannelContext() :
+ChannelContext::ChannelContext(bool addStandardChans) :
     m_last_assigned(Chan_ArbitraryStart-1)
 {
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "addStandardChannels():" << std::endl;
-#endif
-    for (StandardChannel* c=g_standard_channel_table; c->layer_name; ++c)
-    {
-        if (strcmp(c->layer_name, "invalid")==0)
-            continue; // skip Chan_Invalid
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "  ";
-#endif
-        addChannelAlias(c->channel_name,
-                        c->layer_name,
-                        c->ordering_index,
-                        c->dflt_io_name,
-                        c->dflt_io_pixel_type,
-                        c->ordering_index);
-    }
+    if (addStandardChans)
+        addStandardChannels();
 }
 
 
@@ -499,6 +538,24 @@ ChannelContext::~ChannelContext()
     for (size_t i=0; i < m_channelalias_list.size(); i++)
         delete m_channelalias_list[i];
 }
+
+
+void
+ChannelContext::addStandardChannels()
+{
+    for (StandardChannel* c=g_standard_channel_table; c->layer_name; ++c)
+    {
+        if (strcmp(c->layer_name, "invalid")==0)
+            continue; // skip Chan_Invalid
+        addChannelAlias(c->channel_name,
+                        c->layer_name,
+                        c->ordering_index,
+                        getLayerPositionFromKind(c->ordering_index),
+                        c->dflt_io_name,
+                        c->dflt_io_pixel_type);
+    }
+}
+
 
 
 //
@@ -604,12 +661,6 @@ ChannelContext::addChannelAlias (ChannelAlias* alias)
     if (!alias->m_io_name.empty() && findChannelAlias(alias->m_io_name)==NULL)
         m_channelalias_name_map[alias->m_io_name] = index;
 
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << " adding new ChannelAlias('" << alias->layer() << "." << alias->name() << "') ->";
-std::cout << " ChannelIdx " << alias->channel() << ", stored at ChannelAlias index " << index;
-std::cout << std::endl;
-#endif
-
     return alias;
 }
 
@@ -622,16 +673,16 @@ ChannelAlias*
 ChannelContext::addChannelAlias (const std::string& chan_name,
                                  const std::string& layer_name,
                                  ChannelIdx         channel,
+                                 uint32_t           position,
                                  const std::string& io_name,
-                                 Imf::PixelType     io_type,
-                                 ChannelIdx         kind)
+                                 Imf::PixelType     io_type)
 {
     return addChannelAlias(new ChannelAlias(chan_name.c_str(),
                                             layer_name.c_str(),
                                             channel,
+                                            position,
                                             io_name.c_str(),
-                                            io_type,
-                                            kind));
+                                            io_type));
 }
 
 
@@ -639,8 +690,8 @@ ChannelContext::addChannelAlias (const std::string& chan_name,
 // Get or create a channel/alias & possibly a new layer.
 // Return a ChannelAlias or NULL if not able to create it.
 //
-// TODO: This logic is somewhat confused - make sure there's a clear way to
-// repeatedly map the same channel name to the same alias
+// TODO: This logic is a little confused atm - make sure there's a clear way to
+// repeatedly map the same channel name to the same alias.
 // For example, when a standard channel is matched we only create a single alias using the original
 // chan name which may confuse things if the name gets remapped (spmask.3->spmask.flags)
 //
@@ -656,81 +707,75 @@ ChannelContext::getChannelAlias (const char* name)
     // Does alias already exist?
     ChannelAlias* chan = findChannelAlias(name);
     if (chan)
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-    {
-std::cout << "getChannelAlias('" << name << "') MATCHED, alias name='" << chan->fullName() << "'" << std::endl;
         return chan;
-    }
-#else
-        return chan;
-#endif
 
     // Not found, see if name can be split into separate layer/chan strings:
     std::string layer_name, chan_name;
     splitName(name, layer_name, chan_name);
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "getChannel('" << name << "') NOT FOUND:" << std::endl;
-std::cout << "  find layer '" << layer_name << "' with chan='" << chan_name << "'" << std::endl;
-#endif
 
-    ChannelIdx kind = Chan_Invalid;
+    ChannelIdx channel = Chan_Invalid;
+    int position = 0;
 
     // Does channel string corresponds to any standard ones? If so we
-    // can determine the 'kind' of channel:
+    // can determine the 'kind' of channel from it:
     std::string    std_layer_name = "";
     std::string    std_chan_name  = "";
-    ChannelIdx     std_channel    = Chan_Invalid;
     std::string    std_io_name    = "";
     Imf::PixelType std_io_type    = Imf::HALF;
     if (matchStandardChannel(chan_name.c_str(),
                              std_layer_name,
                              std_chan_name,
-                             std_channel,
+                             channel,
                              std_io_name,
                              std_io_type))
     {
-        // Channel name matches one of the standard ones:
-        kind = std_channel;
+        // Channel name matches one of the standard ones, so
+        // get it's layer position:
+        position = getLayerPositionFromKind(channel);
+        // Update layer name if it's empty:
+        // TODO: don't think we need to do this - we should
+        //      handle channel names without layer prefixes!
         if (layer_name.empty())
             layer_name = std_layer_name;
-        // TODO: change chan_name to match the standard name?
+        // TODO: change chan_name to match the standard name?  No, we
+        //    probably want to add two ChannelAlias, one with the
+        //    provided name and one with the std name.
         //chan_name = std_chan_name;
     }
     else
     {
-        // Channel string unrecognized, this is a custom channel:
+        // Channel string unrecognized, this is a custom channel
+        // so default to 'other' if there's no layer in name:
+        // TODO: don't think we need to do this - we should
+        //      handle channel names without layer prefixes!
         if (layer_name.empty())
             layer_name = "other";
     }
 
     // Does the full name now match any existing aliases?
-    std::string full_name = layer_name + "." + chan_name;
-    chan = findChannelAlias(full_name);
-    if (chan)
-#ifdef DCX_DEBUG_CHANNEL_CREATION
+    if (!layer_name.empty())
     {
-std::cout << "    matched layer='" << layer_name << "', chan='" << getChannelName(chan->channel()) << "'";
-std::cout << ", ChannelIdx=" << chan->channel() << ", kind=" << kind << std::endl;
-std::cout << " matched ChannelIdx " << chan->channel() << std::endl;
-        return chan;
+        std::string full_name = layer_name + "." + chan_name;
+        chan = findChannelAlias(full_name);
+        if (chan)
+            return chan;
     }
-#else
-        return chan;
-#endif
 
-    // Create new alias, and possibly a new layer:
+    // Create new alias, and possibly a new layer.
+    // If channel is still Chan_Invalid it will get assigned to next
+    // available slot when added to context:
     chan = addChannelAlias(chan_name,
                            layer_name,
-                           std_channel,
+                           channel,
+                           position,
                            std_io_name,
-                           std_io_type,
-                           kind);
+                           std_io_type);
     if (!chan)
         return NULL; // shouldn't happen...
 
     ChanOrder chan_order;
     chan_order.channel = chan->channel();
-    chan_order.order   = 0; // TODO: determine order!
+    chan_order.order   = chan->layerPosition();
 
     LayerNameToListMap::iterator it = m_layer_name_map.find(layer_name);
     if (it == m_layer_name_map.end())
@@ -745,211 +790,9 @@ std::cout << " matched ChannelIdx " << chan->channel() << std::endl;
     {
         m_layers[it->second].channels.push_back(chan_order);
     }
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "    matched layer='" << layer_name << "', chan='" << getChannelName(chan->channel()) << "', ChannelIdx=" << chan->channel() << ", kind=" << kind << std::endl;
-std::cout << "      ";
-#endif
 
     return chan;
 }
-
-
-
-#if 0
-//
-// Build a layer with optional comma-separated channel name list, creating them if neccessary.
-//
-
-ChannelLayer::ChannelLayer (const char* name,
-                            const char* channels) :
-    m_name(name)
-{
-    // Split the list of channel names:
-    if (channels && channels[0])
-    {
-        std::vector<std::string> tokens;
-        split(std::string(channels), ",", tokens);
-        for (size_t i=0; i < tokens.size(); ++i)
-        {
-            strip(tokens[i]); // remove whitespace
-            if (!tokens[i].empty())
-                addChannel(tokens[i].c_str(), Chan_Invalid/*kind*/);
-        }
-    }
-}
-
-
-//
-// Returns the index of matched ChannelAlias, or -1.
-//
-
-int
-ChannelLayer::getChannel (const char* name) const
-{
-    for (size_t i=0; i < m_channel_list.size(); ++i)
-        if (m_channel_list[i]->name() == name)
-            return (int)i;
-    return -1;
-}
-
-int
-ChannelLayer::getChannel (ChannelAlias* chan) const
-{
-    for (size_t i=0; i < m_channel_list.size(); ++i)
-        if (*m_channel_list[i] == *chan)
-            return (int)i;
-    return -1;
-}
-
-int
-ChannelLayer::getChannel (ChannelIdx channel) const
-{
-    for (size_t i=0; i < m_channel_list.size(); ++i)
-        if (m_channel_list[i]->channel() == channel)
-            return (int)i;
-    return -1;
-}
-
-
-//
-// Add a new ChannelAlias, skipping duplicate names.
-// Returns the index of ChannelAlias or -1 if not added.
-// The ChannelLayer takes ownership of pointer.
-//
-
-int
-ChannelLayer::addChannel (ChannelAlias* chan)
-{
-    if (!chan || chan->name().empty() || chan->channel() == Chan_Invalid)
-        return -1;
-    int i = getChannel(chan->name().c_str());
-    if (i != -1)
-    {
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cerr << "ChannelLayer('" << m_name << "')::add('" << chan->name() << "'): error, duplicate channel name, ignoring." << std::endl;
-#endif
-        return i; // Duplicate channel
-    }
-    // Add the new ChannelAlias:
-    g_access_lock.spinlock();
-    {
-        chan->m_layer = this;
-        m_channel_list.push_back(chan);
-        std::sort(m_channel_list.begin(), m_channel_list.end());
-        // Reassign positions:
-        for (size_t j=0; j < m_channel_list.size(); ++j)
-            m_channel_list[j]->m_position = j;
-    }
-    g_access_lock.unlock();
-    return (int)chan->m_position;
-}
-
-
-//
-// Add a channel to an existing layer.
-//
-
-int
-ChannelLayer::addChannel (const char* chan_name,
-                          ChannelIdx kind)
-{
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "ChannelLayer::addChannel(): layer-name=" << name() << ", chan-name='" << chan_name << "', kind=" << kind << std::endl;
-#endif
-
-    std::string full_name = name() + "." + chan_name;
-    ChannelAlias* chan = findChannelAlias(full_name);
-    if (chan)
-        return addChannel(chan); // Already exists, add it to layer
-
-    // Not found, figure out what channel index to assign:
-    ChannelIdx     channel = Chan_Invalid;
-    std::string    default_io_name = "";
-    Imf::PixelType default_io_type = Imf::HALF;
-
-    // Does chan_name match a predefined channel?
-    std::string predefined_layer;
-    if (matchStandardChannel(chan_name, predefined_layer, channel, default_io_name, default_io_type))
-    {
-        if (kind == Chan_Invalid)
-            kind = channel;
-        else if (channel != kind)
-            channel = kind;
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "  matched channel name '" << chan_name << "' to channel " << kind << " in predefined layer '" << predefined_layer << "'" << std::endl;
-#endif
-    }
-
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "   channel=" << channel << ", kind=" << kind << std::endl;
-#endif
-
-    // Create and add new channel:
-    return addChannel(addChannelAlias(full_name, chan_name, channel,
-                                      default_io_name, default_io_type,
-                                      kind));
-}
-
-
-//
-// Output the name of the layer to the stream
-//
-
-/*friend*/
-std::ostream&
-operator << (std::ostream& os,
-             const ChannelLayer& b)
-{
-    return os << b.m_name;
-}
-
-ChannelLayer*
-addLayer (const char* name)
-{
-    if (!name || !name[0])
-        return 0; // don't crash!
-
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "addLayer('" << name << "' = ";
-#endif
-    ChannelLayer* layer = findLayer(name);
-    if (layer)
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-    {
-std::cout << "MATCH)";
-        return layer;
-    }
-#else
-        return layer;
-#endif
-
-    // Insert it into map, if successful add it to global list:
-    layer = new ChannelLayer(name);
-    g_access_lock.spinlock();
-    g_layer_name_map[std::string(name)] = layer;
-    g_access_lock.unlock();
-#ifdef DCX_DEBUG_CHANNEL_CREATION
-std::cout << "NEW  )";
-#endif
-
-    return layer;
-}
-
-
-ChannelLayer*
-findLayer (const char* name)
-{
-    ChannelLayer* layer = NULL;
-
-    //g_access_lock.spinlock();
-    ChannelLayerNameMap::iterator it = g_layer_name_map.find(std::string(name));
-    if (it != g_layer_name_map.end())
-        layer = it->second;
-    //g_access_lock.unlock();
-
-    return layer;
-}
-#endif
 
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_EXIT

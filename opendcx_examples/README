@@ -24,7 +24,7 @@ OpenDCX API to illustrate common tasks.
 
     raySampleAccumulatorExample.cpp:
         A command that converts input deep pixels into spheres which are
-        then ray traced producing output deep pixels. An simple example
+        then ray traced producing output deep pixels. A simple example
         of collapsing (accumulating) subpixel ray intersections together
         to form a single output deep sample with an accumulated subpixel
         mask.

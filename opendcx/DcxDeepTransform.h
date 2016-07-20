@@ -66,10 +66,6 @@ T degrees (T radians) { return radians*(180/M_PI); }
 //-----------------------------------------------------------------------------------------
 
 
-// Uncomment this to get debug info:
-//#define DCX_DEBUG_TRANSFORM 1
-
-
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
 
@@ -209,19 +205,11 @@ class DCX_EXPORT DeepTransform
     virtual void sample (int outX,
                          int outY,
                          const DeepTile& deep_in_tile,
-                         Dcx::DeepPixel& out_pixel
-#ifdef DCX_DEBUG_TRANSFORM
-                         , bool debug=false
-#endif
-                         );
+                         Dcx::DeepPixel& out_pixel);
 
 
     virtual void transformTile (const DeepTile& in_tile,
-                                DeepTile& out_tile
-#ifdef DCX_DEBUG_TRANSFORM
-                                , bool debug=false
-#endif
-                                );
+                                DeepTile& out_tile);
 
 
   protected:

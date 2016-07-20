@@ -55,9 +55,11 @@
 #include <OpenEXR/ImfHeader.h>
 #include <OpenEXR/ImfDeepImageIO.h>
 
+#include <OpenDCX/DcxChannelContext.h>
 #include <OpenDCX/DcxDeepImageTile.h>
 #include <OpenDCX/DcxDeepTransform.h>
 
+#include <stdlib.h>
 #include <iostream>
 #include <exception>
 
@@ -88,6 +90,7 @@ usageMessage (const char argv0[], bool verbose=false)
                 "  -ininfo  <x> <y>  print input deep pixel info\n"
                 "  -outinfo <x> <y>  print output deep pixel info\n"
                 "\n"
+                "  -v         print additional info\n"
                 "  -h         prints this message\n";
 
          std::cerr << std::endl;
@@ -115,6 +118,8 @@ main (int argc, char *argv[])
     int   infoInY    = -100000;
     int   infoOutX   = -100000;
     int   infoOutY   = -100000;
+    //
+    bool  verbose = false;
 
     //
     // Parse the command line.
@@ -198,6 +203,14 @@ main (int argc, char *argv[])
             infoInY = (int)floor(strtol(argv[i + 2], 0, 0));
             i += 3;
         }
+        else if (!strcmp(argv[i], "-v"))
+        {
+            // Verbose mode:
+            if (i > argc - 1)
+                usageMessage(argv[0]);
+            verbose = true;
+            i += 1;
+        }
         else if (!strcmp(argv[i], "-h"))
         {
             // Print help message:
@@ -224,7 +237,7 @@ main (int argc, char *argv[])
     int exitStatus = 0;
 
 
-    Dcx::ChannelContext channelCtx; // stores shared channel aliases
+    Dcx::ChannelContext chanCtx; // stores shared channel aliases
 
     try
     {
@@ -233,13 +246,14 @@ main (int argc, char *argv[])
         Imf::loadDeepScanLineImage(std::string(inFile), inHeader, inDeepImage);
 
         // Dcx::DeepTile stores the ChannelSet along with the channel ptrs:
-        Dcx::DeepImageInputTile inDeepTile(inHeader, inDeepImage, channelCtx, true/*Yup*/);
+        Dcx::DeepImageInputTile inDeepTile(inHeader, inDeepImage, chanCtx, true/*Yup*/);
 
-#ifdef DCX_DEBUG_TRANSFORM
-std::cout << "reading file '" << inFile << "'" << std::endl;
-std::cout << " in_bbox" << inDeepTile.dataWindow() << std::endl;
-inDeepTile.channels().print("channels=", std::cout, channelCtx); std::cout << std::endl;
-#endif
+        if (verbose)
+        {
+            std::cout << "reading file '" << inFile << "'" << std::endl;
+            std::cout << "  in bbox" << inDeepTile.dataWindow() << std::endl;
+            inDeepTile.channels().print("  in channels=", std::cout, &chanCtx); std::cout << std::endl;
+        }
 
         // Output tile is copy of in tile:
         Dcx::DeepImageOutputTile outDeepTile(inDeepTile);
@@ -271,9 +285,8 @@ inDeepTile.channels().print("channels=", std::cout, channelCtx); std::cout << st
         }
 
         Imath::Box2i out_bbox = xform.transform(inDeepTile.dataWindow(), 0/*&in_bbox*//*clamp_to*/);
-#ifdef DCX_DEBUG_TRANSFORM
-std::cout << "out_bbox" << out_bbox << std::endl;
-#endif
+        if (verbose)
+            std::cout << "out_bbox" << out_bbox << std::endl;
 
         for (int outY=out_bbox.min.y; outY <= out_bbox.max.y; ++outY)
         {
@@ -295,9 +308,11 @@ std::cout << "out_bbox" << out_bbox << std::endl;
 
             outDeepTile.writeScanline(outY, true/*flush*/);
         }
-#ifdef DCX_DEBUG_TRANSFORM
-std::cout << "  out_tile bytes=" << outDeepTile.bytesUsed() << std::endl;
-#endif
+
+        // If all lines are flushed on write the tile should be using zero bytes
+        // by end:
+        if (verbose)
+            std::cout << "  out_tile bytes=" << outDeepTile.bytesUsed() << std::endl;
 
     }
     catch (const std::exception &e)

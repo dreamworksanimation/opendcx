@@ -50,11 +50,15 @@
 #ifdef __ICC
 // disable icc remark #1572: 'floating-point equality and inequality comparisons are unreliable'
 //   this is coming from OpenEXR/half.h...
-#   pragma warning(disable:2557)
+#  pragma warning(disable:2557)
 #endif
 #include <OpenEXR/ImfDeepImage.h>
 #include <OpenEXR/ImfDeepImageLevel.h>
 #include <OpenEXR/ImfDeepScanLineOutputFile.h>
+
+#ifdef DEBUG
+#  include <assert.h>
+#endif
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
@@ -88,7 +92,7 @@ class DCX_EXPORT DeepImageInputTile : public DeepTile
     // displayWindow == dataWindow.
     //
 
-    DeepImageInputTile (const Imf::DeepImage& image,
+    DeepImageInputTile (const OPENEXR_IMF_NAMESPACE::DeepImage& image,
                         ChannelContext& channel_ctx,
                         bool tileYup=true);
 
@@ -99,8 +103,8 @@ class DCX_EXPORT DeepImageInputTile : public DeepTile
     // (TODO: this is awkward - DeepImage class should contain displayWindow!)
     //
 
-    DeepImageInputTile (const Imf::Header& header,
-                        const Imf::DeepImage& image,
+    DeepImageInputTile (const OPENEXR_IMF_NAMESPACE::Header& header,
+                        const OPENEXR_IMF_NAMESPACE::DeepImage& image,
                         ChannelContext& channel_ctx,
                         bool tileYup=true);
 
@@ -126,20 +130,12 @@ class DCX_EXPORT DeepImageInputTile : public DeepTile
 
     /*virtual*/ bool getDeepPixel (int x,
                                    int y,
-                                   Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug=false
-#endif
-                                   ) const;
+                                   Dcx::DeepPixel& pixel) const;
 
     /*virtual*/ bool getSampleMetadata (int x,
                                         int y,
                                         size_t sample,
-                                        Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                        , bool debug=false
-#endif
-                                        ) const;
+                                        Dcx::DeepMetadata& metadata) const;
 
 
   protected:
@@ -149,15 +145,19 @@ class DCX_EXPORT DeepImageInputTile : public DeepTile
     //
     DeepImageInputTile (const DeepTile&);
 
-    bool copyFromLevel (const Imf::DeepImage& image, int level);
+    bool copyFromLevel (const OPENEXR_IMF_NAMESPACE::DeepImage& image,
+                        int level);
 
-    float getChannelSampleValueAt (int x, int y, size_t sample, const Imf::DeepImageChannel*) const;
+    float getChannelSampleValueAt (int x,
+                                   int y,
+                                   size_t sample,
+                                   const OPENEXR_IMF_NAMESPACE::DeepImageChannel*) const;
 
 
   protected:
 
-    const Imf::DeepImageLevel*                  m_image_level;          // The image level
-    std::vector<const Imf::DeepImageChannel*>   m_chan_ptrs;            // Per-ChannelIdx channel data ptrs
+    const OPENEXR_IMF_NAMESPACE::DeepImageLevel* m_image_level;         // The image level
+    std::vector<const OPENEXR_IMF_NAMESPACE::DeepImageChannel*> m_chan_ptrs;  // Per-ChannelIdx channel data ptrs
 
 };
 
@@ -215,7 +215,7 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
     DeepImageOutputTile (const IMATH_NAMESPACE::Box2i& display_window,
                          const IMATH_NAMESPACE::Box2i& data_window,
                          bool sourceWindowsYup,
-                         const ChannelAliasSet& channels,
+                         const ChannelAliasPtrSet& channels,
                          ChannelContext& channel_ctx,
                          bool tileYup=true);
 
@@ -249,20 +249,12 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
 
     /*virtual*/ bool getDeepPixel (int x,
                                    int y,
-                                   Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug=false
-#endif
-                                   ) const;
+                                   Dcx::DeepPixel& pixel) const;
 
     /*virtual*/ bool getSampleMetadata (int x,
                                         int y,
                                         size_t sample,
-                                        Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                        , bool debug=false
-#endif
-                                        ) const;
+                                        Dcx::DeepMetadata& metadata) const;
 
 
     //
@@ -272,11 +264,7 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
 
     /*virtual*/ bool setDeepPixel (int x,
                                    int y,
-                                   const Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug=false
-#endif
-                                   );
+                                   const Dcx::DeepPixel& pixel);
 
 
     //
@@ -285,11 +273,7 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
     //
 
     /*virtual*/ bool clearDeepPixel (int x,
-                                     int y
-#ifdef DCX_DEBUG_DEEPTILE
-                                     , bool debug=false
-#endif
-                                     );
+                                     int y);
 
     //
     // Create an output deep file linked to this tile - destructive!
@@ -298,7 +282,7 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
     //
 
     virtual void    setOutputFile (const char* filename,
-                                   Imf::LineOrder line_order=Imf::INCREASING_Y);
+                                   OPENEXR_IMF_NAMESPACE::LineOrder line_order=OPENEXR_IMF_NAMESPACE::INCREASING_Y);
 
 
     //
@@ -310,11 +294,7 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
     //
 
     virtual void    writeScanline (int y,
-                                   bool flush_line=true
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug=false
-#endif
-                                   );
+                                   bool flush_line=true);
 
 
     //
@@ -332,9 +312,9 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
     DeepLine*   createDeepLine (int y);
 
 
-    std::vector<DeepLine*>          m_deep_lines;       // Channel data storage
+    std::vector<DeepLine*>          m_deep_lines;           // Channel data storage
     std::string                     m_filename;
-    Imf::DeepScanLineOutputFile*    m_file;             // Output file, if assigned
+    OPENEXR_IMF_NAMESPACE::DeepScanLineOutputFile* m_file;  // Output file, if assigned
 
 };
 
@@ -347,22 +327,29 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
 inline
 DeepImageInputTile::DeepImageInputTile (const DeepTile& b) : DeepTile(b) {}
 inline
-float DeepImageInputTile::getChannelSampleValueAt (int x, int y, size_t sample, const Imf::DeepImageChannel* c) const {
-#ifdef DCX_DEBUG_DEEPTILE
+float DeepImageInputTile::getChannelSampleValueAt (int x,
+                                                   int y,
+                                                   size_t sample,
+                                                   const OPENEXR_IMF_NAMESPACE::DeepImageChannel* c) const {
+#ifdef DEBUG
     assert(c);
 #endif
     if (m_tile_yUp)
         y = m_display_window.max.y - y;
     switch (c->pixelType())
     {
-        case Imf::HALF:
-            return float((*static_cast<const Imf::TypedDeepImageChannel<half>* >(c))(x, y)[sample]);
-        case Imf::FLOAT:
-            return (*static_cast<const Imf::TypedDeepImageChannel<float>* >(c))(x, y)[sample];
-        case Imf::UINT:
-            return float((*static_cast<const Imf::TypedDeepImageChannel<unsigned int>* >(c))(x, y)[sample]);
+        case OPENEXR_IMF_NAMESPACE::HALF:
+            return float((*static_cast<const OPENEXR_IMF_NAMESPACE::TypedDeepImageChannel<half>* >(c))(x, y)[sample]);
+        case OPENEXR_IMF_NAMESPACE::FLOAT:
+            return (*static_cast<const OPENEXR_IMF_NAMESPACE::TypedDeepImageChannel<float>* >(c))(x, y)[sample];
+        case OPENEXR_IMF_NAMESPACE::UINT:
+            return float((*static_cast<const OPENEXR_IMF_NAMESPACE::TypedDeepImageChannel<unsigned int>* >(c))(x, y)[sample]);
         default:
+#ifdef DEBUG
             assert(false);
+#else
+            break;
+#endif
     }
     return 0.0f;
 }
@@ -375,7 +362,7 @@ inline
 uint32_t
 DeepImageOutputTile::DeepLine::floatOffset (uint32_t xoffset) const
 {
-#ifdef DCX_DEBUG_DEEPTILE
+#ifdef DEBUG
     assert(xoffset < samples_per_pixel.size());
 #endif
     uint32_t offset = 0;

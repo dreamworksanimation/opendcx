@@ -38,6 +38,8 @@
 
 #include "DDImageAdapter.h"
 
+#include <OpenDCX/DcxChannelContext.h>
+
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
@@ -146,10 +148,10 @@ dcxChannelSet (const DD::Image::ChannelSet& in)
 // 
 //
 
-Dcx::ChannelAliasSet
-dcxChannelAliasSet (const DD::Image::ChannelSet& in)
+Dcx::ChannelAliasPtrSet
+dcxChannelAliasPtrSet (const DD::Image::ChannelSet& in)
 {
-    Dcx::ChannelAliasSet out;
+    Dcx::ChannelAliasPtrSet out;
     foreach(z, in)
     {
         std::map<DD::Image::Channel, Dcx::ChannelAlias*>::const_iterator it = dcx_channelalias_map.find(z);
@@ -407,7 +409,7 @@ DDImageDeepPlane::DDImageDeepPlane (const DD::Image::Box& format,
                   Imath::Box2i(Imath::V2i(bbox.x(),   bbox.y()),
                                Imath::V2i(bbox.r()-1, bbox.t()-1))/*data_window*/,
                   true/*sourceWindowsYup*/,
-                  dcxChannelAliasSet(channels),
+                  dcxChannelAliasPtrSet(channels),
                   dcx_channel_context,
                   write_access_mode,
                   true/*tileYup*/),
@@ -429,11 +431,7 @@ DDImageDeepPlane::getNumSamplesAt (int x, int y) const
 bool
 DDImageDeepPlane::getDeepPixel (int x,
                                 int y,
-                                Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                , bool debug
-#endif
-                                ) const
+                                Dcx::DeepPixel& pixel) const
 {
     return false;
 }
@@ -443,11 +441,7 @@ bool
 DDImageDeepPlane::getSampleMetadata (int x,
                                      int y,
                                      size_t sample,
-                                     Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                     , bool debug
-#endif
-                                     ) const
+                                     Dcx::DeepMetadata& metadata) const
 {
     return false;
 }
@@ -493,11 +487,7 @@ DDImageDeepInputPlane::getNumSamplesAt (int x, int y) const
 bool
 DDImageDeepInputPlane::getDeepPixel (int x,
                                      int y,
-                                     Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                     , bool debug
-#endif
-                                     ) const
+                                     Dcx::DeepPixel& pixel) const
 {
     dcxCopyDDImageDeepPixel(m_in_plane->getPixel(y, x),
                             m_spmask_mode,
@@ -513,11 +503,7 @@ bool
 DDImageDeepInputPlane::getSampleMetadata (int x,
                                           int y,
                                           size_t sample,
-                                          Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                          , bool debug
-#endif
-                                          ) const
+                                          Dcx::DeepMetadata& metadata) const
 {
     dcxGetDeepSampleMetadata(m_in_plane->getPixel(y, x),
                              sample,
@@ -570,11 +556,7 @@ DDImageDeepOutputPlane::getNumSamplesAt (int x, int y) const
 bool
 DDImageDeepOutputPlane::getDeepPixel (int x,
                                       int y,
-                                      Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                      , bool debug
-#endif
-                                      ) const
+                                      Dcx::DeepPixel& pixel) const
 {
     return false;
 }
@@ -585,11 +567,7 @@ bool
 DDImageDeepOutputPlane::getSampleMetadata (int x,
                                            int y,
                                            size_t sample,
-                                           Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                           , bool debug
-#endif
-                                           ) const
+                                           Dcx::DeepMetadata& metadata) const
 {
     return false;
 }
@@ -605,11 +583,7 @@ DDImageDeepOutputPlane::getSampleMetadata (int x,
 bool
 DDImageDeepOutputPlane::setDeepPixel (int,/*x ignored*/
                                       int,/*y ignored*/
-                                      const Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                      , bool debug
-#endif
-                                      )
+                                      const Dcx::DeepPixel& pixel)
 {
     const size_t nSegments = pixel.size();
     assert(nSegments < 10000); // just in case...
@@ -685,11 +659,7 @@ DDImageDeepOutputPlane::setDeepPixel (int,/*x ignored*/
 /*virtual*/
 bool
 DDImageDeepOutputPlane::clearDeepPixel (int,/*x ignored*/
-                                        int /*y ignored*/
-#ifdef DCX_DEBUG_DEEPTILE
-                                        , bool debug
-#endif
-                                        )
+                                        int /*y ignored*/)
 {
     m_out_plane->addHole();
     return true;

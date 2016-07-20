@@ -37,6 +37,7 @@
 
 
 #include "DcxDeepImageTile.h"
+#include "DcxChannelContext.h"
 
 #include <OpenEXR/ImfHeader.h>
 #include <OpenEXR/ImfDeepImage.h>
@@ -112,11 +113,6 @@ DeepImageInputTile::copyFromLevel (const Imf::DeepImage& image,
     m_num_spmask_chans = 0;
     m_flags_channel = Dcx::Chan_Invalid;
 
-#if 0//def DCX_DEBUG_DEEPTILE
-std::cout << "DeepImageInputTile::copyFromLevel(" << this << "): level=" << level << std::endl;
-std::cout << "  display_window" << m_display_window << std::endl;
-std::cout << "     data_window" << m_data_window << std::endl;
-#endif
     if (!updateChannelPtrs())
         return false;
 
@@ -129,16 +125,15 @@ DeepImageInputTile::updateChannelPtrs ()
     if (!m_image_level)
         return false;
 
-#ifdef DCX_DEBUG_DEEPTILE
-std::cout << "DeepImageInputTile::updateChannelPtrs(" << this << ") m_image_level=" << m_image_level << std::endl;
-#endif
     // Copy the channel data ptrs out of the DeepImageLevel:
     m_chan_ptrs.clear();
     std::vector<Dcx::ChannelIdx> chans;
     std::vector<const Imf::DeepImageChannel*> ptrs;
-    Dcx::ChannelAliasSet tile_channels; // set of channels to initialize tile to
+    Dcx::ChannelAliasPtrSet tile_channels; // set of channels to initialize tile to
 
+#ifdef DEBUG
     assert(m_channel_ctx);
+#endif
 
     for (Imf::DeepImageLevel::ConstIterator it=m_image_level->begin(); it != m_image_level->end(); ++it)
     {
@@ -190,14 +185,6 @@ std::cout << "DeepImageInputTile::updateChannelPtrs(" << this << ") m_image_leve
     for (size_t i=0; i < chans.size(); ++i)
         m_chan_ptrs[chans[i]] = ptrs[i];
 
-#ifdef DCX_DEBUG_DEEPTILE
-std::cout << "    chan ptrs[";
-for (size_t i=0; i < m_chan_ptrs.size(); ++i)
-    if (m_chan_ptrs[i] != 0)
-        std::cout << " " << i << "(" << m_chan_ptrs[i] << ")";
-std::cout << "]" << std::endl;
-#endif
-
     return true;
 }
 
@@ -216,38 +203,18 @@ DeepImageInputTile::getNumSamplesAt (int x, int y) const
 bool
 DeepImageInputTile::getDeepPixel (int x,
                                   int y,
-                                  Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                  , bool debug
-#endif
-                                  ) const
+                                  Dcx::DeepPixel& pixel) const
 {
     pixel.clear();
     if (!m_image_level)
-    {
-#if 0//def DCX_DEBUG_DEEPTILE
-        if (debug)
-            std::cout << x << ":" << y << ":getDeepPixel() no active deep level " << m_data_window << std::endl;
-#endif
         return false;
-    }
     if (!isActivePixel(x, y))
-    {
-#if 0//def DCX_DEBUG_DEEPTILE
-        if (debug)
-            std::cout << x << ":" << y << ":getDeepPixel() outside data_window " << m_data_window << std::endl;
-#endif
         return false;
-    }
 
     if (m_channels.empty())
         return true;
 
     const size_t nSamples = m_image_level->sampleCounts()(x, (m_tile_yUp)?(m_display_window.max.y-y):y);
-#ifdef DCX_DEBUG_DEEPTILE
-    if (debug)
-        std::cout << x << ":" << y << ":getDeepPixel() samples=" << nSamples << std::endl;
-#endif
     if (nSamples == 0)
         return true;
 
@@ -284,32 +251,13 @@ DeepImageInputTile::getDeepPixel (int x,
         if (!getSampleMetadata(x, y, sample, ds.metadata))
             return false;
 
-#ifdef DCX_DEBUG_DEEPTILE
-        if (debug) {
-            std::cout << "  " << sample << " " << std::fixed << std::cout.precision(8) << ds.Zf << "-" << ds.Zb;
-            std::cout << ", flags=("; ds.printFlags(std::cout); std::cout << ")";
-            std::cout << " [";
-        }
-#endif
         // Add segment and copy pixel data:
         const size_t dsindex = pixel.append(ds);
         Dcx::Pixelf& p = pixel.getSegmentPixel(dsindex);
         foreach_channel(z, copy_channels)
-        {
             p[*z] = getChannelSampleValueAt(x, y, sample, m_chan_ptrs[*z]);
-#ifdef DCX_DEBUG_DEEPTILE
-            if (debug)
-                std::cout << " " << m_channel_ctx->getChannelName(*z) << "=" << std::fixed << std::cout.precision(6) << p[*z];
-#endif
-        }
-#ifdef DCX_DEBUG_DEEPTILE
-        if (debug)
-        {
-            std::cout << " ]" << std::endl;
-            ds.spMask().printPattern(std::cout, "    ");
-        }
-#endif
     }
+
     return true;
 }
 
@@ -319,11 +267,7 @@ bool
 DeepImageInputTile::getSampleMetadata (int x,
                                        int y,
                                        size_t sample,
-                                       Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                       , bool /*debug*/
-#endif
-                                       ) const
+                                       Dcx::DeepMetadata& metadata) const
 {
     if (m_num_spmask_chans == 2)
     {
@@ -358,7 +302,7 @@ DeepImageInputTile::getSampleMetadata (int x,
 DeepImageOutputTile::DeepImageOutputTile (const IMATH_NAMESPACE::Box2i& display_window,
                                           const IMATH_NAMESPACE::Box2i& data_window,
                                           bool sourceWindowsYup,
-                                          const ChannelAliasSet& channels,
+                                          const ChannelAliasPtrSet& channels,
                                           ChannelContext& channel_ctx,
                                           bool tileYup) :
     DeepTile (display_window, data_window, sourceWindowsYup, channels, channel_ctx, WRITE_RANDOM, tileYup),
@@ -467,7 +411,7 @@ void
 DeepImageOutputTile::DeepLine::get (int xoffset,
                                     Dcx::DeepPixel& deep_pixel) const
 {
-#ifdef DCX_DEBUG_DEEPTILE
+#ifdef DEBUG
     assert(xoffset >= 0 && xoffset < samples_per_pixel.size());
 #endif
 
@@ -528,7 +472,7 @@ DeepImageOutputTile::DeepLine::getMetadata(int xoffset,
                                            Dcx::DeepMetadata& metadata) const
 {
     const uint32_t nSegments = samples_per_pixel[xoffset];
-#ifdef DCX_DEBUG_DEEPTILE
+#ifdef DEBUG
     assert(xoffset >= 0 && xoffset < samples_per_pixel.size());
     assert(sample < nSegments);
 #endif
@@ -560,7 +504,7 @@ void
 DeepImageOutputTile::DeepLine::set (int xoffset,
                                     const Dcx::DeepPixel& deep_pixel)
 {
-#ifdef DCX_DEBUG_DEEPTILE
+#ifdef DEBUG
     assert(xoffset >= 0 && xoffset < samples_per_pixel.size());
 #endif
     const size_t nWriteSegments = deep_pixel.size();
@@ -572,22 +516,16 @@ DeepImageOutputTile::DeepLine::set (int xoffset,
 
     const uint32_t foffset = floatOffset(xoffset);
     const uint32_t nCurrSegments = samples_per_pixel[xoffset];
-#ifdef DCX_DEBUG_DEEPTILE
-    if (debug) std::cout << "  offset=" << offset << ", curr segments=" << nCurrSegments << std::endl;
-#endif
 
     if (nCurrSegments < nWriteSegments)
     {
         // Add segments:
         const size_t nAdd = (nWriteSegments - nCurrSegments);
-#ifdef DCX_DEBUG_DEEPTILE
-        if (debug) std::cout << "  adding " << nAdd << " segments" << std::endl;
-#endif
         int chan_index = 0;
         foreach_channel(z, channels)
         {
             FloatVec& values = channel_arrays[chan_index++];
-#ifdef DCX_DEBUG_DEEPTILE
+#ifdef DEBUG
             assert(foffset <= values.size()); // shouldn't happen...
 #endif
             // Round the memory reserve up in chunks to avoid constantly resizing/copying:
@@ -600,9 +538,6 @@ DeepImageOutputTile::DeepLine::set (int xoffset,
     {
         // Remove segments:
         const size_t nRemove = (nCurrSegments - nWriteSegments);
-#ifdef DCX_DEBUG_DEEPTILE
-        if (debug) std::cout << "  removing " << nRemove << " segments" << std::endl;
-#endif
         int chan_index = 0;
         foreach_channel(z, channels)
         {
@@ -651,7 +586,7 @@ DeepImageOutputTile::DeepLine::set (int xoffset,
 void
 DeepImageOutputTile::DeepLine::clear (int xoffset)
 {
-#ifdef DCX_DEBUG_DEEPTILE
+#ifdef DEBUG
     assert(xoffset >= 0 && xoffset < samples_per_pixel.size());
 #endif
     const uint32_t nCurrSegments = samples_per_pixel[xoffset];
@@ -693,11 +628,7 @@ DeepImageOutputTile::createDeepLine (int y)
 bool
 DeepImageOutputTile::getDeepPixel (int x,
                                    int y,
-                                   Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool /*debug*/
-#endif
-                                   ) const
+                                   Dcx::DeepPixel& pixel) const
 {
     pixel.clear();
     if (!isActivePixel(x, y))
@@ -719,11 +650,7 @@ bool
 DeepImageOutputTile::getSampleMetadata (int x,
                                         int y,
                                         size_t sample,
-                                        Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                        , bool /*debug*/
-#endif
-                                        ) const
+                                        Dcx::DeepMetadata& metadata) const
 {
     if (!isActivePixel(x, y))
         return false;
@@ -745,26 +672,13 @@ DeepImageOutputTile::getSampleMetadata (int x,
 bool
 DeepImageOutputTile::setDeepPixel (int x,
                                    int y,
-                                   const Dcx::DeepPixel& deep_pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                                   , bool debug
-#endif
-                                   )
+                                   const Dcx::DeepPixel& deep_pixel)
 {
     DeepLine* dl = createDeepLine(y);
     if (!dl || x < m_data_window.min.x || x > m_data_window.max.x)
         return false; // don't crash...
 
     const size_t nWriteSegments = deep_pixel.size();
-#ifdef DCX_DEBUG_DEEPTILE
-    if (debug)
-    {
-        std::cout << "setDeepPixel(" << x << ", " << y << ") segments=" << nWriteSegments;
-        std::cout << ", numChannels=" << numChannels();
-        m_channels.print(", tile channels=", std::cout, *m_channel_ctx);
-        std::cout << std::endl;
-    }
-#endif
 
     // Copy DeepPixel data into packed DeepLine arrays (offseting x into array range):
     if (nWriteSegments == 0)
@@ -779,19 +693,11 @@ DeepImageOutputTile::setDeepPixel (int x,
 /*virtual*/
 bool
 DeepImageOutputTile::clearDeepPixel (int x,
-                                     int y
-#ifdef DCX_DEBUG_DEEPTILE
-                                     , bool debug
-#endif
-                                     )
+                                     int y)
 {
     DeepLine* dl = createDeepLine(y);
     if (!dl || x < m_data_window.min.x || x > m_data_window.max.x)
         return false; // don't crash...
-
-#ifdef DCX_DEBUG_DEEPTILE
-    if (debug) std::cout << "clearDeepPixel(" << x << ", " << y << ")" << std::endl;
-#endif
 
     dl->clear(x - m_data_window.min.x); // Offset x into DeepLine array
 
@@ -822,10 +728,6 @@ DeepImageOutputTile::setOutputFile (const char* filename,
     else
         line_order = (m_tile_yUp)?Imf::DECREASING_Y:Imf::INCREASING_Y;
 
-#ifdef DCX_DEBUG_DEEPTILE
-std::cout << "DeepImageOutputTile::setOutputFileName('" << filename << "') line_order=" << line_order << std::endl;
-#endif
-
     Imf::Header header(m_display_window,
                        m_data_window,
                        1.0,/*pixelAspectRatio*/
@@ -841,15 +743,12 @@ std::cout << "DeepImageOutputTile::setOutputFileName('" << filename << "') line_
     foreach_channel(z, write_channels)
     {
         const ChannelAlias* c = getChannelAlias(*z);
+#ifdef DEBUG
         assert(c); // shouldn't happen...
+#endif
 
         // Use the fileIOName for EXR output channel name:
         header.channels().insert(c->fileIOName(), Imf::Channel(c->fileIOPixelType()));
-
-#ifdef DCX_DEBUG_DEEPTILE
-std::cout << "  " << *z << ": ";
-std::cout << " making channel '" << c->fileIOName() << "' of pixelType " << c->fileIOPixelType() << std::endl;
-#endif
     }
 
 #if 0
@@ -857,17 +756,9 @@ std::cout << " making channel '" << c->fileIOName() << "' of pixelType " << c->f
     {
         header.channels().insert("spmask.1", Imf::Channel(Imf::FLOAT));
         header.channels().insert("spmask.2", Imf::Channel(Imf::FLOAT));
-#ifdef DCX_DEBUG_DEEPTILE
-std::cout << "      making spmask channels" << std::endl;
-#endif
     }
     if (m_channels.contains(Mask_DeepFlags))
-    {
         header.channels().insert("spmask.flags", Imf::Channel(Imf::HALF));
-#ifdef DCX_DEBUG_DEEPTILE
-std::cout << "      making flags channels" << std::endl;
-#endif
-    }
 #endif
 
     delete m_file;
@@ -889,19 +780,11 @@ typedef std::vector<DeepImageOutputTile::UintVec>  UintSamples;
 /*virtual*/
 void
 DeepImageOutputTile::writeScanline (int y,
-                                    bool flush_line
-#ifdef DCX_DEBUG_DEEPTILE
-                                    , bool debug
-#endif
-                                    )
+                                    bool flush_line)
 {
-#ifdef DCX_DEBUG_DEEPTILE
-if (debug)
-    std::cout << "DeepImageOutputTile::writeScanline(" << y << ")" << std::endl;
-#endif
-
     if (!m_file || y < m_data_window.min.y || y > m_data_window.max.y)
         return; // don't crash...  TODO: throw exception?
+
     y -= m_data_window.min.y;
     const DeepLine* dl = m_deep_lines[y];
     if (!dl)
@@ -910,14 +793,13 @@ if (debug)
     // Unpack the floats to arrays of the appropriate pixel types and
     // assign the frambuffer slices to them:
     const size_t nChannels = m_channel_aliases.size();
-#ifdef DCX_DEBUG_DEEPTILE
-if (debug)
-    std::cout << "  nChannels=" << nChannels;
-#endif
     if (nChannels == 0)
         return;
+
     const size_t nPixels = dl->samples_per_pixel.size();
+#ifdef DEBUG
     assert(nPixels == this->w());
+#endif
 
     // Unpacked sample data storage (only some of these actually get filled in):
     std::vector<HalfSamples>   half_samples(nChannels);
@@ -936,10 +818,8 @@ if (debug)
     foreach_channel(z, m_channels)
     {
         const ChannelAlias* c = getChannelAlias(*z);
+#ifdef DEBUG
         assert(c); // shouldn't happen...
-#ifdef DCX_DEBUG_DEEPTILE
-if (debug)
-    std::cout << "  " << *z << ": '" << c->fileIOName() << "'";
 #endif
 
         const float* IN = dl->channel_arrays[chan_index].data();
@@ -1001,7 +881,9 @@ if (debug)
             }
 
             default:
+#ifdef DEBUG
                 assert(0); // TODO: throw exception instead?
+#endif
                 break;
         }
 
@@ -1013,10 +895,6 @@ if (debug)
 
         ++chan_index;
     }
-#ifdef DCX_DEBUG_DEEPTILE
-if (debug)
-    std::cout << std::endl;
-#endif
 
     // Write line to file:
     m_file->setFrameBuffer(fb);

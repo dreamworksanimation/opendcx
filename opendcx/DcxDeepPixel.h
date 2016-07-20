@@ -55,7 +55,6 @@
 #include <vector>
 #include <math.h> // for log1p, expm1
 
-//#define DCX_DEBUG_FLATTENER 1
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
@@ -543,11 +542,7 @@ class DCX_EXPORT DeepPixel
 
     void    flatten (const ChannelSet& out_channels,
                      Pixelf& out,
-                     InterpolationMode interpolation = INTERP_AUTO
-#ifdef DCX_DEBUG_FLATTENER
-                     , bool debug=false
-#endif
-                     );
+                     InterpolationMode interpolation = INTERP_AUTO);
 
 
     //-------------------------------------------------------------------
@@ -569,11 +564,7 @@ class DCX_EXPORT DeepPixel
     void    flattenSubpixels (const ChannelSet& out_channels,
                               Pixelf& out,
                               const SpMask8& spmask,
-                              InterpolationMode interpolation = INTERP_AUTO
-#ifdef DCX_DEBUG_FLATTENER
-                              , bool debug=false
-#endif
-                              );
+                              InterpolationMode interpolation = INTERP_AUTO);
 
 
     //---------------------------------------------------------------
@@ -589,11 +580,7 @@ class DCX_EXPORT DeepPixel
     //---------------------------------------------------------------
     void    flattenNoOverlaps (const ChannelSet& out_channels,
                                Pixelf& out,
-                               const SpMask8& spmask
-#ifdef DCX_DEBUG_FLATTENER
-                               , bool debug=false
-#endif
-                               );
+                               const SpMask8& spmask);
 
 
     //--------------------------------------------------------------
@@ -610,11 +597,7 @@ class DCX_EXPORT DeepPixel
     void    flattenOverlapping (const ChannelSet& out_channels,
                                 Pixelf& out,
                                 const SpMask8& spmask,
-                                InterpolationMode interpolation = INTERP_AUTO
-#ifdef DCX_DEBUG_FLATTENER
-                                , bool debug=false
-#endif
-                                );
+                                InterpolationMode interpolation = INTERP_AUTO);
 
 
     //-------------------------------------------------------

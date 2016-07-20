@@ -42,19 +42,17 @@
 //
 //  typedef  ChannelIdx
 //  typedef  ChannelIdxSet
+//
 //  class    ChannelSet
 //
 //-----------------------------------------------------------------------------
 
 #include "DcxAPI.h"
 
-#include <OpenEXR/ImfPixelType.h>
-
+#include <stdint.h> // for uint32_t
 #include <vector>
 #include <set>
 #include <iostream>
-
-//#define DCX_DEBUG_CHANNEL_CREATION 1
 
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
@@ -156,7 +154,7 @@ class DCX_EXPORT ChannelSet
 
     //-----------------------------------------------------
     // Constructor to initialize from a set of ChannelIdx's
-    // (TODO: change to a C++11 initializer list...!)
+    // (TODO: change to a C++11 initializer list)
     //-----------------------------------------------------
     ChannelSet (ChannelIdx a,
                 ChannelIdx b=Chan_Invalid, ChannelIdx c=Chan_Invalid,
@@ -268,12 +266,20 @@ class DCX_EXPORT ChannelSet
 
 
     //--------------------------------------------------------------------
-    // Print info about the set to an output stream
+    // Print info about the set to an output stream.
+    // If the ChannelContext is NULL only the ChannelIdx number will be
+    // printed, otherwise the channel names will.
     //--------------------------------------------------------------------
     void print (const char* prefix,
                 std::ostream&,
-                const ChannelContext&) const;
+                const ChannelContext* ctx=0) const;
 
+    //------------------------------------------------------
+    // Outputs the ChannelIdx of the channels to the stream.
+    //------------------------------------------------------
+
+    friend std::ostream& operator << (std::ostream&,
+                                      const ChannelSet&);
 
   protected:
 

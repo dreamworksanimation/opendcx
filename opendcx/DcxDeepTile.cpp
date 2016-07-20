@@ -75,7 +75,7 @@ DeepTile::DeepTile (const DeepTile& b) :
 DeepTile::DeepTile (const IMATH_NAMESPACE::Box2i& display_window,
                     const IMATH_NAMESPACE::Box2i& data_window,
                     bool sourceWindowsYup,
-                    const ChannelAliasSet& channels,
+                    const ChannelAliasPtrSet& channels,
                     ChannelContext& channel_ctx,
                     WriteAccessMode write_access_mode,
                     bool tileYup) :
@@ -100,17 +100,13 @@ DeepTile::DeepTile (const IMATH_NAMESPACE::Box2i& display_window,
 
 /*virtual*/
 void
-DeepTile::updateChannels (const ChannelAliasSet& channels)
+DeepTile::updateChannels (const ChannelAliasPtrSet& channels)
 {
-#ifdef DCX_DEBUG_DEEPTILE
-std::cout << "DeepTile::updateChannels(" << this << ") channels size=" << channels.size() << std::endl;
-Dcx::ChannelSet spmask_channels;
-#endif
     m_channels.clear();
     m_channel_aliases.clear();
     m_num_spmask_chans = 0;
     m_flags_channel = Dcx::Chan_Invalid;
-    for (ChannelAliasSet::const_iterator it=channels.begin(); it != channels.end(); ++it)
+    for (ChannelAliasPtrSet::const_iterator it=channels.begin(); it != channels.end(); ++it)
     {
         ChannelAlias* c = *it;
         if (!c || c->channel() == Chan_Invalid || m_channels.contains(c->channel()))
@@ -120,23 +116,10 @@ Dcx::ChannelSet spmask_channels;
         m_channel_aliases[c->channel()] = c;
 
         if (c->channel() >= Chan_SpBits1 && c->channel() <= Chan_SpBitsLast)
-#ifdef DCX_DEBUG_DEEPTILE
-        {
-            spmask_channels += c->channel();
             ++m_num_spmask_chans;
-        }
-#else
-            ++m_num_spmask_chans;
-#endif
         if (c->channel() == Chan_DeepFlags && m_flags_channel == Chan_Invalid)
             m_flags_channel = Chan_DeepFlags;
     }
-#ifdef DCX_DEBUG_DEEPTILE
-m_channels.print("  channels=", std::cout, *m_channel_ctx); std::cout << std::endl;
-std::cout << "  spmask channels(" << m_num_spmask_chans << ")";
-    spmask_channels.print("=", std::cout, *m_channel_ctx); std::cout << std::endl;
-//std::cout << "  flags chan=" << getChannelFullName(m_flags_channel) << std::endl;
-#endif
 }
 
 

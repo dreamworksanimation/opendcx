@@ -49,8 +49,6 @@
 
 #include <OpenEXR/ImathBox.h>
 
-#include <assert.h>
-
 //----------------------------------------------------------------------------------------------------
 // TODO: this seems missing from IlmBase...where to put this...?
 template <class T>
@@ -61,11 +59,8 @@ operator << (std::ostream& os,
     os << "[" << b.min.x << " " << b.min.y << " " << b.max.x << " " << b.max.y << "]";
     return os;
 }
+
 //----------------------------------------------------------------------------------------------------
-
-
-// Uncomment this to get debug info:
-//#define DCX_DEBUG_DEEPTILE 1
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
@@ -128,7 +123,7 @@ class DCX_EXPORT DeepTile
     DeepTile (const IMATH_NAMESPACE::Box2i& display_window,
               const IMATH_NAMESPACE::Box2i& data_window,
               bool sourceWindowsYup,
-              const ChannelAliasSet& channels,
+              const ChannelAliasPtrSet& channels,
               ChannelContext&  channel_ctx,
               WriteAccessMode write_access_mode=WRITE_DISABLED,
               bool tileYup=true);
@@ -224,20 +219,12 @@ class DCX_EXPORT DeepTile
 
     virtual bool getDeepPixel (int x,
                                int y,
-                               Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                               , bool debug=false
-#endif
-                               ) const=0;
+                               Dcx::DeepPixel& pixel) const=0;
 
     virtual bool getSampleMetadata (int x,
                                     int y,
                                     size_t sample,
-                                    Dcx::DeepMetadata& metadata
-#ifdef DCX_DEBUG_DEEPTILE
-                                    , bool debug=false
-#endif
-                                    ) const=0;
+                                    Dcx::DeepMetadata& metadata) const=0;
 
 
     //
@@ -246,16 +233,12 @@ class DCX_EXPORT DeepTile
     // is left empty and false is returned.
     // x or y arguments might be ignored depending on write access mode.
     //
-    // Default implementation always returns false.
+    // Base class returns false.
     //
 
     virtual bool setDeepPixel (int x,
                                int y,
-                               const Dcx::DeepPixel& pixel
-#ifdef DCX_DEBUG_DEEPTILE
-                               , bool debug=false
-#endif
-                               );
+                               const Dcx::DeepPixel& pixel);
 
 
     //
@@ -263,15 +246,11 @@ class DCX_EXPORT DeepTile
     // Returns false if x,y is out of bounds or the tile can't be written to.
     // x or y arguments might be ignored depending on write access mode.
     //
-    // Default implementation always returns false.
+    // Base class returns false.
     //
 
     virtual bool clearDeepPixel (int x,
-                                 int y
-#ifdef DCX_DEBUG_DEEPTILE
-                                 , bool debug=false
-#endif
-                                 );
+                                 int y);
 
   protected:
     //
@@ -285,7 +264,7 @@ class DCX_EXPORT DeepTile
     // If spmask or flag channels are in the set this will update the
     // spmask channel count and the flags channel.
     //
-    virtual void updateChannels (const ChannelAliasSet& channels);
+    virtual void updateChannels (const ChannelAliasPtrSet& channels);
 
     // Assigned vars:
     WriteAccessMode         m_write_access_mode;    // Supported spatial write-access mode
@@ -343,17 +322,9 @@ bool DeepTile::hasSpMasks () const { return (m_num_spmask_chans > 0); }
 inline
 bool DeepTile::hasFlags () const { return (m_flags_channel != Dcx::Chan_Invalid); }
 inline
-bool DeepTile::setDeepPixel (int, int, const Dcx::DeepPixel&
-#ifdef DCX_DEBUG_DEEPTILE
-                             , bool
-#endif
-                             ) { return false; }
+bool DeepTile::setDeepPixel (int, int, const Dcx::DeepPixel&) { return false; }
 inline
-bool DeepTile::clearDeepPixel (int, int
-#ifdef DCX_DEBUG_DEEPTILE
-                               , bool
-#endif
-                               ) { return false; }
+bool DeepTile::clearDeepPixel (int, int) { return false; }
 
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_EXIT

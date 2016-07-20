@@ -42,9 +42,14 @@
 
 #define SSAMPLING_MAX 8
 
+// Uncomment this to get debug info:
+//#define DCX_DEBUG_TRANSFORM 1
+
+
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
-// TODO: move this somewhere common or use another lock class...
+// This is used for matrix inversion safety.
+// TODO: switch to a predefined lock class - IlmThreadMutex?
 struct GlobalLock
 {
     pthread_mutex_t m_mutex;
@@ -59,7 +64,7 @@ struct GlobalLock
             sched_yield();
     }
 };
-static GlobalLock       g_access_lock;
+static GlobalLock g_lock;
 
 
 //-------------------------------------------------------------------------------
@@ -104,13 +109,13 @@ DeepTransform::imatrix()
 {
     if (!m_updated)
     {
-        g_access_lock.lock();
+        g_lock.lock();
         if (!m_updated)
         {
             m_imatrix = m_matrix.inverse();
             m_updated = true;
         }
-        g_access_lock.unlock();
+        g_lock.unlock();
     }
     return m_imatrix;
 }
@@ -118,6 +123,21 @@ DeepTransform::imatrix()
 
 //-------------------------------------------------------------------------------
 
+#if 1
+inline
+IMATH_NAMESPACE::V3f
+XY_x_M44(float x, float y, const IMATH_NAMESPACE::M44f& m)
+{
+    return IMATH_NAMESPACE::V3f(x, y, 0.0f)*m;
+}
+#else
+inline
+IMATH_NAMESPACE::V2f
+XY_x_M44(float x, float y, const IMATH_NAMESPACE::M44f& m)
+{
+    return IMATH_NAMESPACE::V2f(x * m[][], y * m[][]);
+}
+#endif
 
 /*static*/
 void
@@ -125,11 +145,14 @@ DeepTransform::transform (const IMATH_NAMESPACE::Box2i& in,
                           const IMATH_NAMESPACE::M44f& m,
                           IMATH_NAMESPACE::Box2i& out)
 {
+    // TODO: we don't need the full V3*M44 for a 2D transform, but I don't see a Imath::Matrix4
+    // method for that.  Make an inline function that does a simplified xy*M44.
+
     // Change r/t to exclusive:
-    const IMATH_NAMESPACE::V3f p0 = IMATH_NAMESPACE::V3f(float(in.min.x  ), float(in.min.y  ), 0.0f) * m; // bottom-left
-    const IMATH_NAMESPACE::V3f p1 = IMATH_NAMESPACE::V3f(float(in.max.x+1), float(in.min.y  ), 0.0f) * m; // bottom-right
-    const IMATH_NAMESPACE::V3f p2 = IMATH_NAMESPACE::V3f(float(in.max.x+1), float(in.max.y+1), 0.0f) * m; // top-right
-    const IMATH_NAMESPACE::V3f p3 = IMATH_NAMESPACE::V3f(float(in.min.x  ), float(in.max.y+1), 0.0f) * m; // top-left
+    const IMATH_NAMESPACE::V3f p0 = XY_x_M44(float(in.min.x  ), float(in.min.y  ), m); // bottom-left
+    const IMATH_NAMESPACE::V3f p1 = XY_x_M44(float(in.max.x+1), float(in.min.y  ), m); // bottom-right
+    const IMATH_NAMESPACE::V3f p2 = XY_x_M44(float(in.max.x+1), float(in.max.y+1), m); // top-right
+    const IMATH_NAMESPACE::V3f p3 = XY_x_M44(float(in.min.x  ), float(in.max.y+1), m); // top-left
     // TODO: enable pad or add as passed-in option?
     const float rounding_pad = 0.0f;//0.5f;
     // Find the x->r && y->t range:
@@ -154,11 +177,7 @@ void
 DeepTransform::sample (int outX,
                        int outY,
                        const DeepTile& deep_in_tile,
-                       Dcx::DeepPixel& out_pixel
-#ifdef DCX_DEBUG_TRANSFORM
-                       , bool debug
-#endif
-                       )
+                       Dcx::DeepPixel& out_pixel)
 {
     out_pixel.clear();
 
@@ -442,11 +461,7 @@ DeepTransform::sample (int outX,
 /*virtual*/
 void
 DeepTransform::transformTile (const DeepTile& in_tile,
-                              DeepTile& out_tile
-#ifdef DCX_DEBUG_TRANSFORM
-                              , bool debug
-#endif
-                              )
+                              DeepTile& out_tile)
 {
     ChannelSet do_channels(out_tile.channels());
     do_channels &= in_tile.channels(); // Only process shared tile channels

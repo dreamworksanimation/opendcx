@@ -47,7 +47,10 @@
 #include <OpenEXR/ImfHeader.h>
 #include <OpenEXR/ImfDeepImageIO.h>
 
+#include <OpenDCX/DcxChannelContext.h>
 #include <OpenDCX/DcxDeepImageTile.h>
+
+#include <stdlib.h>
 
 void
 usageMessage (const char argv0[], bool verbose=false)
@@ -79,6 +82,7 @@ main (int argc, char *argv[])
     int infoX = -100000;
     int infoY = -100000;
     bool showMasks = true;
+    bool verbose = false;
 
     //
     // Parse the command line.
@@ -115,6 +119,14 @@ main (int argc, char *argv[])
             showMasks = false;
             i += 1;
         }
+        else if (!strcmp(argv[i], "-v"))
+        {
+            // Verbose mode:
+            if (i > argc - 1)
+                usageMessage(argv[0]);
+            verbose = true;
+            i += 1;
+        }
         else if (!strcmp(argv[i], "-h"))
         {
             // Print help message:
@@ -134,7 +146,7 @@ main (int argc, char *argv[])
 
     int exitStatus = 0;
 
-    Dcx::ChannelContext channelCtx; // stores shared channel aliases
+    Dcx::ChannelContext chanCtx; // stores shared channel aliases
 
     try
     {
@@ -143,7 +155,13 @@ main (int argc, char *argv[])
         Imf::loadDeepScanLineImage(std::string(inFile), inHeader, inDeepImage);
 
         // Dcx::DeepTile stores the ChannelSet along with the channel ptrs:
-        Dcx::DeepImageInputTile inDeepTile(inHeader, inDeepImage, channelCtx, true/*Yup*/);
+        Dcx::DeepImageInputTile inDeepTile(inHeader, inDeepImage, chanCtx, true/*Yup*/);
+        if (verbose)
+        {
+            std::cout << "reading file '" << inFile << "'" << std::endl;
+            std::cout << "  in bbox" << inDeepTile.dataWindow() << std::endl;
+            inDeepTile.channels().print("  in channels=", std::cout, &chanCtx); std::cout << std::endl;
+        }
 
         // Dcx::DeepPixel stores all the DeepSegments (samples) for the entire deep pixel:
         Dcx::DeepPixel deepPixel(inDeepTile.channels());

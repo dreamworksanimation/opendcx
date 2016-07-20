@@ -128,6 +128,7 @@ endif
 INCLUDE_NAMES := \
         DcxAPI.h \
         DcxChannelAlias.h \
+        DcxChannelContext.h \
         DcxChannelDefs.h \
         DcxChannelSet.h \
         DcxDeepImageTile.h \
