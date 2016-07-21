@@ -258,11 +258,7 @@ DeepTransform::sample (int outX,
         for (int tX=in.min.x; tX <= in.max.x; ++tX)
         {
             // Get the deep pixel from the deep tile:
-            deep_in_tile.getDeepPixel(tX, tY, in_pixel
-#ifdef DCX_DEBUG_FLATTENER
-                                      , debug
-#endif
-                                      );
+            deep_in_tile.getDeepPixel(tX, tY, in_pixel);
             const size_t nSegments = in_pixel.size();
 #ifdef DCX_DEBUG_TRANSFORM
             if (debug) {
@@ -473,11 +469,7 @@ DeepTransform::transformTile (const DeepTile& in_tile,
     {
         for (int outX=out_tile.x(); outX <= out_tile.r(); ++outX)
         {
-            Dcx::DeepTransform::sample(outX, outY, in_tile, out_pixel
-#ifdef DCX_DEBUG_TRANSFORM
-                                        , debug/*debug*/
-#endif
-                                        );
+            Dcx::DeepTransform::sample(outX, outY, in_tile, out_pixel);
 #ifdef DCX_DEBUG_TRANSFORM
             if (debug) {
                 std::cout << "out[" << outX << " " << outY << "]" << std::endl;

@@ -615,7 +615,7 @@ class DCX_EXPORT DeepPixel
 
     void    printInfo (std::ostream&,
                        const char* prefix,
-                       size_t padding=2,
+                       int padding=2,
                        bool show_mask=true);
     friend  std::ostream& operator << (std::ostream&,
                                        DeepPixel&);

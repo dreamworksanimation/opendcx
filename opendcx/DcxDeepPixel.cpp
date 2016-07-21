@@ -37,15 +37,19 @@
 
 #include "DcxDeepPixel.h"
 
-#include <assert.h>
 #include <algorithm> // for std::sort in some compilers
 
-// Uncomment this to get loads of info from flattener:
-//#define DCX_DEBUG_FLATTENER 1
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
+// Uncomment this to get lots of info from flattener:
+//#define DCX_DEBUG_FLATTENER 1
+#ifdef DCX_DEBUG_FLATTENER
+#  include <assert.h>
+#endif
 
+
+// For now we're using a fixed number of steps:
 #define SEGMENT_SAMPLE_STEPS 5
 //#define SEGMENT_SAMPLE_STEPS 15
 
@@ -132,7 +136,7 @@ DeepSegment::printInfo (std::ostream& os) const
 void
 DeepPixel::printInfo (std::ostream& os,
                       const char* prefix,
-                      size_t padding,
+                      int padding,
                       bool show_mask)
 {
     if (prefix && prefix[0])
@@ -150,7 +154,7 @@ DeepPixel::printInfo (std::ostream& os,
         padding = std::max(0, std::min((int)padding, 1024));
         std::vector<char> spaces(padding*2+1, ' ');
         spaces[spaces.size()-1] = 0;
-        for (size_t i=0; i < m_segments.size(); ++i) {
+        for (uint32_t i=0; i < m_segments.size(); ++i) {
             const DeepSegment& segment = m_segments[i];
             os.precision(8);
             os << &spaces[padding] << i << ": Zf=" << std::fixed << segment.Zf << " Zb=" << segment.Zb;
@@ -207,7 +211,7 @@ operator << (std::ostream& os,
     os << "{";
     if (dp.size() > 0)
     {
-        for (size_t i=0; i < dp.size(); ++i)
+        for (uint32_t i=0; i < dp.size(); ++i)
         {
             if (i > 0)
                 os << " ";
@@ -296,7 +300,9 @@ size_t
 DeepPixel::append (const DeepPixel& b,
                    size_t segment_index)
 {
+#ifdef DCX_DEBUG_FLATTENER
     assert(segment_index < b.m_segments.size());
+#endif
     const DeepSegment& bs = b[segment_index];
     const Pixelf& bp = b.m_pixels[bs.index];
     return this->append(bs, bp);
@@ -537,25 +543,11 @@ DeepPixel::flatten (const ChannelSet& out_channels,
             std::cout << ": FULL-COVERAGE: interpolation=" << interpolation << std::endl;
 #endif
         if (!has_overlaps || interpolation == OPENDCX_INTERNAL_NAMESPACE::INTERP_OFF)
-        {
             // No overlaps, do a simple linear flatten:
-            flattenNoOverlaps(out_channels, out, SpMask8::fullCoverage
-#ifdef DCX_DEBUG_FLATTENER
-                                , debug
-#endif
-                                );
-
-        }
+            flattenNoOverlaps(out_channels, out, SpMask8::fullCoverage);
         else
-        {
             // Merge overlapping deep segments:
-            flattenOverlapping(out_channels, out, SpMask8::fullCoverage, interpolation
-#ifdef DCX_DEBUG_FLATTENER
-                                , debug
-#endif
-                                );
-
-        }
+            flattenOverlapping(out_channels, out, SpMask8::fullCoverage, interpolation);
         return;
     }
 
@@ -567,15 +559,16 @@ DeepPixel::flatten (const ChannelSet& out_channels,
 #endif
 
     out.erase(out_channels);
-    out[Chan_Z     ] =  INFINITYf;
+    //out[Chan_Z     ] =  INFINITYf;
     out[Chan_ZFront] =  INFINITYf;
     out[Chan_ZBack ] = -INFINITYf;
 
     Pixelf flattened(out_channels);
 
 #if 0
-    // TODO: handle the Z accumulation with coverage weighting - i.e. pick Z from the sample with largest coverage
-    // TODO: finishing this code will likely produce more accurate flattened Z's
+    // TODO: handle the Z accumulation with coverage weighting - i.e. pick Z from
+    //    the sample with largest coverage.
+    //    Finishing this code will likely produce more accurate flattened Z's
     std::vector<int> frontmost_coverage;
     frontmost_coverage.resize(this->size(), 0);
 #endif
@@ -594,11 +587,7 @@ DeepPixel::flatten (const ChannelSet& out_channels,
         for (size_t sp_x=0; sp_x < subpixels_x; ++sp_x)
         {
             // Flatten just the segments that have their masks on for this subpixel:
-            flattenSubpixels(out_channels, flattened, sp_mask, interpolation
-#ifdef DCX_DEBUG_FLATTENER
-                                , debug
-#endif
-                            );
+            flattenSubpixels(out_channels, flattened, sp_mask, interpolation);
             // Add flattened subpixel color to accumulation pixel:
             out += flattened;
 #if 1
@@ -610,12 +599,12 @@ DeepPixel::flatten (const ChannelSet& out_channels,
             }
             else
             {
-                out[Chan_Z     ] = std::min(out[Chan_Z     ], flattened[Chan_Z     ]);
+                //out[Chan_Z     ] = std::min(out[Chan_Z     ], flattened[Chan_Z     ]);
                 out[Chan_ZFront] = std::min(out[Chan_ZFront], flattened[Chan_ZFront]);
                 out[Chan_ZBack ] = std::min(out[Chan_ZBack ], flattened[Chan_ZBack ]);
             }
 #else
-            // TODO: handle the Z accumulation with coverage weighting!
+            // TODO: handle the Z accumulation with coverage weighting
             frontmost_coverage[] = 
 #endif
             //
@@ -626,14 +615,15 @@ DeepPixel::flatten (const ChannelSet& out_channels,
 
     // If final cutout Z is in front of non-cutout Z, output INF:
     if (cutout_Z < out[Chan_ZFront])
-        out[Chan_Z] = out[Chan_ZFront] = out[Chan_ZBack] = INFINITYf;
+        /*out[Chan_Z] = */out[Chan_ZFront] = out[Chan_ZBack] = INFINITYf;
 
     if (count > 1)
         out /= float(count);
 
 #if 0
-    // TODO: handle the Z accumulation with coverage weighting - i.e. pick Z from the sample with largest coverage
-    // TODO: finishing this code will likely produce more accurate flattened Z's
+    // TODO: handle the Z accumulation with coverage weighting - i.e. pick Z from
+    //    the sample with largest coverage.
+    //    Finishing this code will likely produce more accurate flattened Z's
     // Find frontmost with most counts:
     int max_coverage = -1;
     for (size_t i=0; i < nSpans; ++i)
@@ -674,25 +664,11 @@ DeepPixel::flattenSubpixels (const ChannelSet& out_channels,
 
     // Are there overlaps...?:
     if (!has_overlaps || interpolation == OPENDCX_INTERNAL_NAMESPACE::INTERP_OFF)
-    {
         // No overlaps, do a simple linear flatten:
-        flattenNoOverlaps(out_channels, out, spmask
-#ifdef DCX_DEBUG_FLATTENER
-                            , debug
-#endif
-                            );
-
-    }
+        flattenNoOverlaps(out_channels, out, spmask);
     else
-    {
         // Merge overlapping deep segments:
-        flattenOverlapping(out_channels, out, spmask, interpolation
-#ifdef DCX_DEBUG_FLATTENER
-                            , debug
-#endif
-                            );
-
-    }
+        flattenOverlapping(out_channels, out, spmask, interpolation);
 }
 
 //-------------------------------------------------------------------------------------
@@ -709,7 +685,7 @@ DeepPixel::flattenNoOverlaps (const ChannelSet& out_channels,
     out.erase(out_channels);
     // Always fill in these output channels even though they may not be enabled
     // in the output pixel's channel set:
-    out[Chan_Z      ] =  INFINITYf;
+    //out[Chan_Z      ] =  INFINITYf;
     out[Chan_ZFront ] =  INFINITYf;
     out[Chan_ZBack  ] = -INFINITYf;
     out[Chan_CutoutA] = 0.0f;
@@ -844,7 +820,7 @@ DeepPixel::flattenNoOverlaps (const ChannelSet& out_channels,
             if (out[Chan_A] >= EPSILONf)
             {
                 if (segment.Zf > 0.0f)
-                    out[Chan_Z] = out[Chan_ZFront] = std::min(segment.Zf, out[Chan_ZFront]);
+                    /*out[Chan_Z] = */out[Chan_ZFront] = std::min(segment.Zf, out[Chan_ZFront]);
                 if (segment.Zb > 0.0f)
                     out[Chan_ZBack] = std::max(segment.Zb, out[Chan_ZBack]);
             }
@@ -873,12 +849,12 @@ DeepPixel::flattenNoOverlaps (const ChannelSet& out_channels,
 
     // If nearest cutout Z is in front of non-cutout, output INF:
     if (out[Chan_CutoutZ] < out[Chan_ZFront])
-        out[Chan_Z] = out[Chan_ZFront] = out[Chan_ZBack] = INFINITYf;
+        /*out[Chan_Z] = */out[Chan_ZFront] = out[Chan_ZBack] = INFINITYf;
 
     else if (out[Chan_ZBack] < 0.0f)
         out[Chan_ZBack] = INFINITYf;
 
-    // Final alpha is matte-cutout-alpha channel:
+    // Final alpha is cutout-alpha channel:
     out[Chan_A] = (out[Chan_CutoutA] >= (1.0f - EPSILONf))?1.0f:out[Chan_CutoutA];
 
 } // DeepPixel::flattenNoOverlaps
@@ -888,21 +864,22 @@ DeepPixel::flattenNoOverlaps (const ChannelSet& out_channels,
 //----------------------------------------------------------------------------
 
 
+typedef std::set<uint32_t> SegmentEdgeSet;
+
 //
-//  This structure is the same as the Foundry's.
-//  Tried a couple other variations but their method of maintaining
-//  a std::set of active edges was the cleanest in the end.
+// Two of these are created for each DeepSegment to track
+// the active segments.
 //
 
 enum { THIN_EDGE = -1, FRONT_EDGE = 0, BACK_EDGE = 1 };
 
-struct Edge
+struct SegmentEdge
 {
-    float   depth;
-    size_t  segment;
-    int     type;
+    float      depth;
+    uint32_t   segment;
+    int        type;
 
-    Edge(float _depth, size_t _segment, int _type) :
+    SegmentEdge(float _depth, uint32_t _segment, int _type) :
         depth(_depth),
         segment(_segment),
         type(_type)
@@ -910,7 +887,7 @@ struct Edge
         //
     }
 
-    bool operator < (const Edge& b) const
+    bool operator < (const SegmentEdge& b) const
     {
         if (depth   < b.depth  ) return true;
         if (depth   > b.depth  ) return false;
@@ -933,13 +910,13 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
     out.erase(out_channels);
     // Always fill in these output channels even though they may not be enabled
     // in the output pixel's channel set:
-    out[Chan_Z      ] =  INFINITYf;
+    //out[Chan_Z      ] =  INFINITYf;
     out[Chan_ZFront ] =  INFINITYf;
     out[Chan_ZBack  ] = -INFINITYf;
     out[Chan_CutoutA] =  0.0f;
     out[Chan_CutoutZ] =  INFINITYf;
 
-    const size_t nSegments = m_segments.size();
+    const uint32_t nSegments = m_segments.size();
 #ifdef DCX_DEBUG_FLATTENER
     if (debug) {
 //        std::cout << "    DeepPixel::flattenOverlapping=" << out_channels << ", nSegments=" << nSegments;
@@ -966,8 +943,6 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
     ChannelSet comp_channels_with_cutout_no_alpha(comp_channels_no_alpha);
     comp_channels_with_cutout_no_alpha += Chan_CutoutA;
 
-    //this->sort(); // shouldn't be necessary due to sorting during edge-list construction
-
     // Is this deep pixel full of legacy (no spmask, no interpolation flag) samples?
     const bool useSpMasks = !isLegacyDeepPixel();
 
@@ -979,10 +954,10 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
         std::cout << "      useSpMasks=" << useSpMasks << ", interpolation=" << interpolation << std::endl;
 #endif
 
-    // Build the list of Edges:
-    std::vector<Edge> edges;
-    edges.reserve(nSegments * 2);
-    for (size_t j=0; j < nSegments; ++j)
+    // Build the list of SegmentEdges from DeepSegments:
+    std::vector<SegmentEdge> segment_edges;
+    segment_edges.reserve(nSegments * 2);
+    for (uint32_t j=0; j < nSegments; ++j)
     {
         const DeepSegment& segment = m_segments[j];
 #ifdef DCX_DEBUG_FLATTENER
@@ -1003,16 +978,16 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
         if (!isinf(segment.Zf) || !isinf(segment.Zb))
         {
             if (segment.isThin())
-                edges.push_back(Edge(segment.Zf, j, THIN_EDGE ));
+                segment_edges.push_back(SegmentEdge(segment.Zf, j, THIN_EDGE ));
 
             else
             {
-                edges.push_back(Edge(segment.Zf, j, FRONT_EDGE));
-                edges.push_back(Edge(segment.Zb, j, BACK_EDGE ));
+                segment_edges.push_back(SegmentEdge(segment.Zf, j, FRONT_EDGE));
+                segment_edges.push_back(SegmentEdge(segment.Zb, j, BACK_EDGE ));
             }
         }
     }
-    const size_t nEdges = edges.size();
+    const uint32_t nEdges = segment_edges.size();
     if (nEdges == 0)
     {
         out[Chan_ZBack] = INFINITYf;
@@ -1020,9 +995,9 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
     }
 
     // Re-sort edges, this will change order based on edge type:
-    std::sort(edges.begin(), edges.end());
+    std::sort(segment_edges.begin(), segment_edges.end());
 
-    std::set<size_t> active_segments;
+    SegmentEdgeSet active_segments;
     int num_log_samples = 0;
     int num_lin_samples = 0;
     int num_additive_samples = 0;
@@ -1040,10 +1015,10 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
 
 #ifdef DCX_DEBUG_FLATTENER
     if (debug) {
-        std::cout << "      edges:" << std::endl;
+        std::cout << "      segment_edges:" << std::endl;
         std::cout.precision(8);
-        for (size_t j=0; j < nEdges; ++j) {
-            const Edge& edge = edges[j];
+        for (uint32_t j=0; j < nEdges; ++j) {
+            const SegmentEdge& edge = segment_edges[j];
             const DeepSegment& segment = m_segments[edge.segment];
             const Pixelf& pixel = getSegmentPixel(edge.segment);
             std::cout.precision(8);
@@ -1058,10 +1033,12 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
         std::cout << "      ----------------- edges loop -------------------" << std::endl;
     }
 #endif
-    for (size_t j=0; j < nEdges; ++j)
+    for (uint32_t j=0; j < nEdges; ++j)
     {
-        const Edge& edge = edges[j];
+        const SegmentEdge& edge = segment_edges[j];
+#ifdef DCX_DEBUG_FLATTENER
         assert(edge.segment < nSegments);
+#endif
         const DeepSegment& segment0 = m_segments[edge.segment];
 
 #ifdef DCX_DEBUG_FLATTENER
@@ -1175,7 +1152,7 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
                 if (out[Chan_A] >= EPSILONf)
                 {
                     if (segment0.Zf > 0.0f)
-                        out[Chan_Z] = out[Chan_ZFront] = std::min(segment0.Zf, out[Chan_ZFront]);
+                        /*out[Chan_Z] = */out[Chan_ZFront] = std::min(segment0.Zf, out[Chan_ZFront]);
                     if (segment0.Zb > 0.0f)
                         out[Chan_ZBack] = std::max(segment0.Zb, out[Chan_ZBack]);
                 }
@@ -1194,7 +1171,7 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
 
             // If nearest cutout Z is in front of non-cutout, output INF:
             if (out[Chan_CutoutZ] < out[Chan_ZFront])
-                out[Chan_Z] = out[Chan_ZFront] = out[Chan_ZBack] = INFINITYf;
+                /*out[Chan_Z] = */out[Chan_ZFront] = out[Chan_ZBack] = INFINITYf;
 
             else if (out[Chan_ZBack] < 0.0f)
                 out[Chan_ZBack] = INFINITYf;
@@ -1213,11 +1190,13 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
 
         // There is always at least another entry in edges at this point, to disable the ones that are active.
         // In the final iteration in the iterator for-loop, active_segments should be empty!
-        assert((j + 1) < nEdges);
+#ifdef DCX_DEBUG_FLATTENER
+        assert((j + 1) < nEdges); // shouldn't heppen...
+#endif
 
         // Get Z distance between this edge and the next edge:
         const float Z0 = edge.depth;
-        const float Z1 = edges[j + 1].depth;
+        const float Z1 = segment_edges[j + 1].depth;
         const float distance_to_next_edge = (Z1 - Z0);
 
         // Segment too thin to interpolate - skip it:
@@ -1229,7 +1208,7 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
             std::cout << "        ----------------- merging loop -------------------" << std::endl;
             std::cout.precision(8);
             std::cout << "        combine active samples [";
-            for (std::set<size_t>::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it)
+            for (SegmentEdgeSet::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it)
                 std::cout << " ," << *it;
             std::cout << " ], Z0=" << Z0 << ", Z1=" << Z1 << ", distance_to_next_edge=" << distance_to_next_edge << std::endl;
         }
@@ -1260,9 +1239,9 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
                 // converted for channel-loop use:
                 //
                 //==============================================================
-                for (std::set<size_t>::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it)
+                for (SegmentEdgeSet::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it)
                 {
-                    const size_t active_segment = *it;
+                    const uint32_t active_segment = *it;
 #ifdef DCX_DEBUG_FLATTENER
                     assert(active_segment < m_segments.size());
 #endif
@@ -1365,9 +1344,9 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
 
                 double absorption_accum = 0.0;
                 float  merged_alpha = 0.0f;
-                for (std::set<size_t>::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it)
+                for (SegmentEdgeSet::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it)
                 {
-                    const size_t active_segment = *it;
+                    const uint32_t active_segment = *it;
 #ifdef DCX_DEBUG_FLATTENER
                     assert(active_segment < m_segments.size());
 #endif
@@ -1535,7 +1514,7 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
         else
         {
             //-----------------------------------------------------------------------------------------
-            // Log/Lin combo (or Lin/Lin, see All-lin above):
+            // Log/Lin combo (or Lin/Lin, see All-lin note above):
             //-----------------------------------------------------------------------------------------
 
             // Only 1 sample and it's a lin?  Don't bother step sampling:
@@ -1543,7 +1522,7 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
             {
                 merged_color.erase(comp_channels_with_cutout);
 
-                const size_t active_segment = *active_segments.begin();
+                const uint32_t active_segment = *active_segments.begin();
 #ifdef DCX_DEBUG_FLATTENER
                 assert(active_segment < m_segments.size());
 #endif
@@ -1623,7 +1602,6 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
                 // final merged value.
                 //----------------------------------------------------------------
 
-                // For now we're using a small, fixed number of steps:
                 /* TODO: make steps non-linear and/or adaptive - use a pow curve?
 
                    Mark's comment re. handling step size & count:
@@ -1641,6 +1619,7 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
                      as flattened rgb increases you can increase step size because
                      perceptually the increments in rgb are less meaningful.)
                 */
+                // For now we're using a fixed number of steps:
                 const double step_size = (double(Z1) - double(Z0)) / double(SEGMENT_SAMPLE_STEPS - 1);
 
                 sample_colors.clear();
@@ -1649,9 +1628,9 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
                 prev_colors.reserve(active_segments.size());
 
                 // Initialize the sample colors to the start of the sub-segment:
-                for (std::set<size_t>::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it)
+                for (SegmentEdgeSet::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it)
                 {
-                    const size_t active_segment = *it;
+                    const uint32_t active_segment = *it;
 #ifdef DCX_DEBUG_FLATTENER
                     assert(active_segment < nSegments);
 #endif
@@ -1748,17 +1727,17 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
 
                 // Step through the Z0-Z1 range interpolating the active segments, averaging them together to
                 // make one slice, then UNDER-ing the slice:
-                for (size_t i=1; i < SEGMENT_SAMPLE_STEPS; ++i)
+                for (uint32_t i=1; i < SEGMENT_SAMPLE_STEPS; ++i)
                 {
-                    size_t interp_index = 0;
+                    uint32_t interp_index = 0;
                     merged_color.erase(comp_channels_with_cutout);
                     additive_color.erase(comp_channels_with_cutout);
                     float accum_alpha = 0.0f;
                     //float merged_alpha = 0.0f;
                     int additive_count = 0;
-                    for (std::set<size_t>::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it, ++interp_index)
+                    for (SegmentEdgeSet::const_iterator it=active_segments.begin(); it != active_segments.end(); ++it, ++interp_index)
                     {
-                        const size_t active_segment = *it;
+                        const uint32_t active_segment = *it;
 #ifdef DCX_DEBUG_FLATTENER
                         assert(active_segment < nSegments);
 #endif
@@ -1914,7 +1893,7 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
             else
             {
                 if (Z0 > 0.0f)
-                    out[Chan_Z] = out[Chan_ZFront] = std::min(Z0, out[Chan_ZFront]);
+                    /*out[Chan_Z] = */out[Chan_ZFront] = std::min(Z0, out[Chan_ZFront]);
                 if (Z1 > 0.0f)
                     out[Chan_ZBack] = std::max(Z1, out[Chan_ZBack]);
             }
@@ -1946,12 +1925,12 @@ DeepPixel::flattenOverlapping (const ChannelSet& out_channels, Pixelf& out,
 
     // If nearest cutout Z is in front of non-cutout, output INF:
     if (out[Chan_CutoutZ] < out[Chan_ZFront])
-        out[Chan_Z] = out[Chan_ZFront] = out[Chan_ZBack] = INFINITYf;
+        /*out[Chan_Z] = */out[Chan_ZFront] = out[Chan_ZBack] = INFINITYf;
 
     else if (out[Chan_ZBack] < 0.0f)
         out[Chan_ZBack] = INFINITYf;
 
-    // Final alpha is matte-cutout-alpha channel:
+    // Final alpha is cutout-alpha channel:
     out[Chan_A] = (out[Chan_CutoutA] >= (1.0f - EPSILONf))?1.0f:out[Chan_CutoutA];
 
 #ifdef DCX_DEBUG_FLATTENER
