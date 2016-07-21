@@ -54,7 +54,7 @@ using namespace DD::Image;
 //----------------------------------------------------------------------------------------
 
 // Keep these matching Dcx::SpMaskMode and Dcx::InterpolationMode enums
-static const char* spmask_modes[]        = { "off", "auto", "4x4", "8x8", /*"16x16",*/ 0 }; // TODO: DEPRECATE!
+static const char* spmask_modes[]        = { "off", "auto", "4x4", "8x8", /*"16x16",*/ 0 }; // TODO: DEPRECATE! CHANGE TO ON/OFF BOOL
 static const char* interpolation_modes[] = { "off", "auto", "log", "lin", 0 };
 
 
@@ -67,7 +67,7 @@ class DeepToImage : public DD::Image::Iop {
     bool                    k_cutout_color;         //!< Does a cutout operation affect color channels?
     //
     int                     k_interpolation_mode;   //!< Interpolation mode
-    int                     k_spmask_mode;          //!< Subpixel mask mode - DEPRECATE!
+    int                     k_spmask_mode;          //!< Subpixel mask mode - TODO: DEPRECATE! CHANGE TO ON/OFF BOOL
     DD::Image::Channel      k_spmask_channel[2];    //!< Subpixel mask channels
     DD::Image::Channel      k_flags_channel;        //!< Per-sample flags channel
 #ifdef DCX_DEBUG_FLATTENER
@@ -77,7 +77,7 @@ class DeepToImage : public DD::Image::Iop {
 
 
     DD::Image::ChannelSet   m_spmask_channels;      //!< 
-    int                     m_spmask_size;          //!< 0, 4, or 8 - DEPRECATE!
+    int                     m_spmask_size;          //!< 0, 4, or 8 - TODO: DEPRECATE! CHANGE TO ON/OFF BOOL
     bool                    m_spmask_have_flags;    //!< Are flags active?
     Box                     m_request_bbox;         //!< Remember the requested bbox
 
@@ -111,7 +111,7 @@ public:
         k_cutout_color       = true;
         //
         k_interpolation_mode = (int)Dcx::INTERP_AUTO;
-        k_spmask_mode        = (int)Dcx::SPMASK_AUTO; // TODO: DEPRECATE!
+        k_spmask_mode        = (int)Dcx::SPMASK_AUTO; // TODO: DEPRECATE! CHANGE TO ON/OFF BOOL
         k_spmask_channel[0]  = DD::Image::getChannel(Dcx::spMask8ChannelName1);
         k_spmask_channel[1]  = DD::Image::getChannel(Dcx::spMask8ChannelName2);
         k_flags_channel      = DD::Image::getChannel(Dcx::flagsChannelName);
@@ -149,25 +149,23 @@ public:
         //Bool_knob(f, &k_cutout_color, "cutout_color", "cutout color");
         Newline(f);
         Enumeration_knob(f, &k_interpolation_mode, interpolation_modes, "interpolation_mode", "interpolation");
-            Tooltip(f, "<b>auto</b> mode uses the 3rd spmask channel to identify the interpolation mode per-sample "
-                       "allowing the merging of lin/lin, lin/log & log/log sample combinations to be "
-                       "handled properly.\n"
+            Tooltip(f, "<b>auto</b> mode uses the spmask flags channel to identify the per-sample interpolation "
+                       "mode allowing the merging of lin/lin, lin/log & log/log sample combinations to be "
+                       "handled correctly.\n"
                        "\n"
-                       "<b>log</b> and <b>lin</b> forces the interpolation mode regardless of the per-sample info.\n"
+                       "<b>log</b> and <b>lin</b> forces the interpolation mode, ignoring the per-sample info.\n"
                        "\n"
                        "<b>off</b> disables overlap interpolation entirely so flattening assumes all samples "
-                       "are separated. If any samples do overlap this mode will likely produce artifacts "
+                       "are separated in Z. If any samples *do* overlap this mode will likely produce artifacts "
                        "(for debugging purposes only)");
         Newline(f);
+        // TODO: DEPRECATE! CHANGE TO ON/OFF BOOL:
         Enumeration_knob(f, &k_spmask_mode, spmask_modes, "subpixel_mask_mode", "subpixel mask");
-            Tooltip(f, "If this is <b>auto</b> and the specified subpixel mask channels present on the input "
-                       "then use that mask to perform subpixel intersection testing for a more accurate "
-                       "results, especially with overlapping hard-surface renders.\n"
-                       "\n"
-                       "If there is only 1 sp-mask channel on the input or selected then a 4x4 mask is used,"
-                       "otherwise for 2 sp-mask channels an 8x8 mask is assumed.");
+            Tooltip(f, "If <b>auto</b> and the specified subpixel mask channels are present on the input "
+                       "then build a subpixel mask from them to perform individual subpixel intersection "
+                       "testing. This produces more accurate results, especially with overlapping "
+                       "hard-surface renders.");
         Input_Channel_knob(f, k_spmask_channel, 2/*nChans*/, 0/*input*/, "spmask_channels", "spmask channels");
-            SetFlags(f, Knob::NO_CHECKMARKS);
             Tooltip(f, "Channels which contain the per-sample spmask data. Two channels are required for an 8x8 mask.");
         Input_Channel_knob(f, &k_flags_channel, 1/*nChans*/, 0/*input*/, "flags_channel", "flags");
             ClearFlags(f, Knob::STARTLINE);
@@ -221,7 +219,7 @@ public:
             out_channels += DD::Image::Mask_Deep;
 
             // Get spmask params from input channels:
-            // TODO: deprecate this!
+            // TODO: DEPRECATE! CHANGE TO ON/OFF BOOL
             if (k_spmask_mode != (int)Dcx::SPMASK_OFF) {
                 if (k_spmask_mode == (int)Dcx::SPMASK_AUTO) {
                     if (k_spmask_channel[0] != DD::Image::Chan_Black &&
@@ -344,18 +342,22 @@ public:
 #ifdef DCX_DEBUG_FLATTENER
                 const bool debug = (X == int(k_debug[0]) && y == int(k_debug[1]));
 #endif
-                Dcx::dcxCopyDDImageDeepPixel(in_deep_plane.getPixel(y, X), (Dcx::SpMaskMode)k_spmask_mode,
-                                             spmask8_chan_list, k_flags_channel, dcx_deep_pixel);
+                Dcx::dcxCopyDDImageDeepPixel(in_deep_plane.getPixel(y, X),
+                                             (Dcx::SpMaskMode)k_spmask_mode,
+                                             spmask8_chan_list,
+                                             k_flags_channel,
+                                             dcx_deep_pixel);
+#ifdef DCX_DEBUG_FLATTENER
+                if (debug) dcx_deep_pixel.printInfo(std::cout);
+#endif
 
                 // Skip if nothing to flatten:
                 if (dcx_deep_pixel.size() == 0)
                     continue;
 
-                dcx_deep_pixel.flatten(dcx_flatten_channels, dcx_flattened, (Dcx::InterpolationMode)k_interpolation_mode
-#ifdef DCX_DEBUG_FLATTENER
-                                       , debug
-#endif
-                                       );
+                dcx_deep_pixel.flatten(dcx_flatten_channels,
+                                       dcx_flattened,
+                                       (Dcx::InterpolationMode)k_interpolation_mode);
 
                 // Copy flattened pixel to output row:
                 foreach(z, out_channels)
@@ -369,18 +371,23 @@ public:
             Dcx::Pixelf dcx_accum(dcx_flatten_channels);
 
             for (int X=x; X < r; ++X) {
+#ifdef DCX_DEBUG_FLATTENER
+                const bool debug = (X == int(k_debug[0]) && y == int(k_debug[1]));
+#endif
                 dcx_accum.erase();
-                dcx_accum[Dcx::Chan_Z      ] =  INFINITYf;
+                //dcx_accum[Dcx::Chan_Z      ] =  INFINITYf;
                 dcx_accum[Dcx::Chan_ZFront ] =  INFINITYf;
                 dcx_accum[Dcx::Chan_ZBack  ] = -INFINITYf;
                 //dcx_accum[Dcx::Chan_CutoutA] =  0.0f;
                 dcx_accum[Dcx::Chan_CutoutZ] =  INFINITYf;
 
-                Dcx::dcxCopyDDImageDeepPixel(in_deep_plane.getPixel(y, X), (Dcx::SpMaskMode)k_spmask_mode,
-                                             spmask8_chan_list, k_flags_channel, dcx_deep_pixel);
+                Dcx::dcxCopyDDImageDeepPixel(in_deep_plane.getPixel(y, X),
+                                             (Dcx::SpMaskMode)k_spmask_mode,
+                                             spmask8_chan_list,
+                                             k_flags_channel,
+                                             dcx_deep_pixel);
 #ifdef DCX_DEBUG_FLATTENER
-                const bool debug = (X == int(k_debug[0]) && y == int(k_debug[1]));
-                //if (debug) dcx_deep_pixel.printInfo(std::cout);
+                if (debug) dcx_deep_pixel.printInfo(std::cout);
 #endif
 
                 // Skip if nothing to flatten:
@@ -394,20 +401,9 @@ public:
                 int count = 0;
                 for (int sp_y=0; sp_y < subpixels; ++sp_y) {
                     for (int sp_x=0; sp_x < subpixels; ++sp_x) {
-#ifdef DCX_DEBUG_FLATTENER
-                        if (k_debug_sp_x >= 0 && k_debug_sp_y >= 0 &&
-                            (k_debug_sp_x != sp_x || k_debug_sp_y != sp_y)) {
-                           ++sp_mask; // same as <<=
-                           continue;
-                        }
-#endif
 
                         dcx_deep_pixel.flattenSubpixels(dcx_flatten_channels, dcx_flattened, sp_mask/*spmask*/,
-                                                        (Dcx::InterpolationMode)k_interpolation_mode/*interp_mode*/
-#ifdef DCX_DEBUG_FLATTENER
-                                                        , debug
-#endif
-                                                        );
+                                                        (Dcx::InterpolationMode)k_interpolation_mode/*interp_mode*/);
                         // Add flattended subpixel to accumulation pixel:
                         dcx_accum += dcx_flattened;
 
@@ -428,14 +424,13 @@ public:
                         ++count;
                     }
                 }
-#ifdef DCX_DEBUG_FLATTENER
-#else
+#ifdef DEBUG
                 assert(count > 0); // Shouldn't happen...
 #endif
 
                 // If final cutout Z is in front of non-cutout Z, output INF:
                 if (k_cutout_z && dcx_accum[Dcx::Chan_CutoutZ] < dcx_accum[Dcx::Chan_ZFront])
-                    dcx_accum[Dcx::Chan_Z] = dcx_accum[Dcx::Chan_ZBack] = INFINITYf;
+                    dcx_accum[Dcx::Chan_ZFront] = dcx_accum[Dcx::Chan_ZBack] = INFINITYf;
 
                 // Write flattened result to Row:
                 if (count > 1) {

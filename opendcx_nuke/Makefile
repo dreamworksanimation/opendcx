@@ -205,6 +205,7 @@ endif
 NUKE_PLUGIN_SRC_NAMES := \
     nuke/DeepMatte.cpp \
     nuke/DeepToImage.cpp \
+    nuke/DeepSubpixelMask.cpp \
     nuke/DeepTransform.cpp \
 #
 

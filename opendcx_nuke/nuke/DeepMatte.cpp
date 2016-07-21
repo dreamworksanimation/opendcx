@@ -74,7 +74,7 @@ public:
         "   DEEP_ADDITIVE_SAMPLE      = 0x04\n"
         "\n"
         "When deep pixels are flattened (DeepToImage, DeepCamDefocus) the matte-object "
-        "flag is used to make sure the alpha channel is properly cutout.";
+        "flag is used to make sure the alpha channel is properly cut out.";
     }
 
     DeepMatte(Node* node) : DeepFilterOp(node) {
@@ -99,7 +99,7 @@ public:
         if (show_surface_knobs) {
             Enumeration_knob(f, &k_surface_mode, flag_modes, "hard_surface_mode", "hard-surface flag");
                 Tooltip(f, "Set/clear the hard-surface flag.  If it's on the samples are interpreted as "
-                           "hard-surfaces with linear interpolation and if off the sample is volumetric "
+                           "hard surfaces with linear interpolation and if off the samples are volumetric "
                            "with log interpolation.");
             Bool_knob(f, &k_fill_spmask, "fill_spmask", "fill spmask");
                 Tooltip(f, "Fill subpixel-mask of non-zero pixels with all ones (turn on all bits.)");
@@ -125,7 +125,6 @@ public:
                            "the double-premult from happening.");
         }
         Input_Channel_knob(f, k_spmask_channel, 2/*nChans*/, 0/*input*/, "spmask_channels", "spmask channels");
-            SetFlags(f, Knob::NO_CHECKMARKS);
             Tooltip(f, "Channels which contain the per-sample spmask data. Two channels are required for an 8x8 mask.");
         Input_Channel_knob(f, &k_flags_channel, 1/*nChans*/, 0/*input*/, "flags_channel", "flags");
             ClearFlags(f, Knob::STARTLINE);
@@ -317,10 +316,10 @@ public:
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 
-// Build a DeepMatte:
+// Build a DeepMatte node:
 static Op* build(Node* node) { return new DeepMatte(node); }
 const Op::Description DeepMatte::description("DeepMatte", "Deep/DeepMatte", build);
 
-// Build a DeepSurfaceType:
+// Build a DeepSurfaceType node:
 static Op* build_surface(Node* node) { return new DeepSurfaceType(node); }
 const Op::Description DeepSurfaceType::description_surface("DeepSurfaceType", "Deep/DeepSurfaceType", build_surface);

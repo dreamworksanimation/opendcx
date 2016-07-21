@@ -48,8 +48,6 @@
 
 using namespace DD::Image;
 
-//#define DEBUG_INFO 1
-
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
@@ -60,9 +58,9 @@ class DeepTransform : public DeepFilterOp, public Dcx::DeepTransform {
     DD::Image::Channel      k_flags_channel;        //!< Per-sample flags channel
     //
     Matrix4                 k_transform;
-    double                  k_ztranslate;
-    double                  k_zscale;
-    bool                    k_invert;
+    //double                  k_ztranslate;
+    //double                  k_zscale;
+    //bool                    k_invert;
     //
     Filter                  k_filter;               //!< Filter to use
     bool                    k_black_outside;        //!< 
@@ -90,9 +88,9 @@ public:
         k_flags_channel      = DD::Image::getChannel(Dcx::flagsChannelName);
         //
         k_transform.makeIdentity();
-        k_ztranslate    = 0.0;
-        k_zscale        = 1.0;
-        k_invert        = false;
+        //k_ztranslate    = 0.0;
+        //k_zscale        = 1.0;
+        //k_invert        = false;
         //
         m_ss_factor     = 4;
         k_black_outside = true;
@@ -108,14 +106,14 @@ public:
     void knobs(Knob_Callback f) {
         Transform2d_knob(f, &k_transform, "transform", "transform");
         //
-        Double_knob(f, &k_ztranslate, "ztranslate", "");
-            ClearFlags(f, Knob::SLIDER);
-            SetFlags(f, Knob::LOG_SLIDER);
-        Double_knob(f, &k_zscale, IRange(0.0,5.0), "zscale", "zscale");
-            ClearFlags(f, Knob::SLIDER || Knob::STARTLINE);
-            SetFlags(f, Knob::LOG_SLIDER);
-            Tooltip(f, "Deep scale.  This is a divisor, so number > 1 will reduce the depth "
-                        "and numbers < 1 will increase the depth.");
+        //Double_knob(f, &k_ztranslate, "ztranslate", "");
+        //    ClearFlags(f, Knob::SLIDER);
+        //    SetFlags(f, Knob::LOG_SLIDER);
+        //Double_knob(f, &k_zscale, IRange(0.0,5.0), "zscale", "zscale");
+        //    ClearFlags(f, Knob::SLIDER || Knob::STARTLINE);
+        //    SetFlags(f, Knob::LOG_SLIDER);
+        //    Tooltip(f, "Deep scale.  This is a divisor, so number > 1 will reduce the depth "
+        //                "and numbers < 1 will increase the depth.");
         Newline(f);
         //
         Int_knob(f, &m_ss_factor, "supersampling_factor", "supersampling factor");
@@ -125,7 +123,6 @@ public:
         //
         Divider(f);
         Input_Channel_knob(f, k_spmask_channel, 2/*nChans*/, 0/*input*/, "spmask_channels", "spmask channels");
-            SetFlags(f, Knob::NO_CHECKMARKS);
             Tooltip(f, "Channels which contain the per-sample spmask data. Two channels are required for an 8x8 mask.");
         Input_Channel_knob(f, &k_flags_channel, 1/*nChans*/, 0/*input*/, "flags_channel", "flags");
             ClearFlags(f, Knob::STARTLINE);
@@ -201,14 +198,6 @@ public:
 
         ChannelSet input_channels(channels);
         input_channels += m_input_spmask_channels;
-
-#ifdef DEBUG_INFO
-        std::cout << "DeepTransform::getDeepRequests()";
-        std::cout << " bbox [" << bbox.x() << " " << bbox.y() << " " << bbox.r() << " " << bbox.t() << "]";
-        std::cout << ", channels=" << channels << ", count=" << count << std::endl;
-        std::cout << "  input_bbox [" << input_bbox.x() << " " << input_bbox.y() << " " << input_bbox.r() << " " << input_bbox.t() << "]";
-        std::cout << ", input_channels=" << input_channels << ", requests.size()=" << requests.size() << std::endl;
-#endif
 #if 1
         requests.push_back(RequestData(input0(), input_bbox, input_channels, count));
 #else
@@ -232,7 +221,8 @@ public:
                                                                          Imath::V2i(output_bbox.r()-1, output_bbox.t()-1)));
         Box input_bbox(ob.min.x, ob.min.y, ob.max.x+1, ob.max.y+1);
 
-        // If input box is inversed output black:  //TODO: don't think this can ever happen...
+        // If input box is inversed output black:
+        //TODO: don't think this can ever happen, check Dcx::DeepTransform
         if (input_bbox.x() >= input_bbox.r() || input_bbox.y() >= input_bbox.t()) {
             for (Box::iterator it = output_bbox.begin(); it != output_bbox.end(); ++it)
                 deep_out_plane.addHole();
@@ -278,17 +268,13 @@ public:
             const bool debug = (it.x == int(k_debug[0]) && it.y == int(k_debug[1]));
 #endif
 
-            Dcx::DeepTransform::sample(it.x, it.y, dcx_in_tile, out_pixel
-#ifdef DCX_DEBUG_TRANSFORM
-                                       , debug/*debug*/
-#endif
-                                       );
+            Dcx::DeepTransform::sample(it.x, it.y, dcx_in_tile, out_pixel);
 #ifdef DCX_DEBUG_TRANSFORM
             if (debug)
                 out_pixel.printInfo(std::cout, "out_pixel=", 1/*padding*/);
 #endif
 
-            dcx_out_tile.setDeepPixel(-1/*x ignored*/, -1/*x ignored*/, out_pixel);
+            dcx_out_tile.setDeepPixel(-1/*x ignored*/, -1/*y ignored*/, out_pixel);
         }
 
         return true;
