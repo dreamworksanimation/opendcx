@@ -73,14 +73,17 @@ split (const std::string& src,
        const char* delimiters,
        std::vector<std::string>& tokens)
 {
-    for (size_t index=0; ;) {
-        size_t a = src.find_first_of(delimiters, index);
-        if (a == std::string::npos) {
-            if (src.length() > index)
+    const size_t len = src.length();
+    for (size_t index=0; ;)
+    {
+        const size_t a = src.find_first_of(delimiters, index);
+        if (a == std::string::npos)
+        {
+            if (index < len)
                 tokens.push_back(src.substr(index, std::string::npos));
             break;
         }
-        if (a != index)
+        if (a > index)
             tokens.push_back(src.substr(index, a-index));
         index = a+1;
     }
@@ -93,21 +96,22 @@ split (const std::string& src,
 
 inline
 void
-strip (std::string& src,
+strip (std::string& str,
        const char* delimiters=" \n\t\r")
 {
-    std::string s0(src);
+    std::string s0(str);
     std::string s1; s1.reserve(s0.length());
     std::string* p0 = &s0;
     std::string* p1 = &s1;
-    for (const char* dp = delimiters; *dp; ++dp) {
+    for (const char* dp=delimiters; *dp; ++dp)
+    {
         for (std::string::iterator i=p0->begin(); i != p0->end(); ++i)
             if (*i != *dp)
                 p1->push_back(*i);
         p0->clear();
         std::string* t = p0; p0 = p1; p1 = t; // swap pointers
     }
-    src = *p0;
+    str = *p0;
 }
 
 
@@ -139,8 +143,8 @@ splitName (const char* name,
 
 //-----------------------------------------------------------------------------
 //
-// Standard predefined layer / channel combinations as recommended
-// by OpenEXR documentation (with some extras....)
+// Standard predefined layer / channel combinations as recommended by
+// OpenEXR documentation (with some extras....)
 //
 //-----------------------------------------------------------------------------
 
@@ -149,7 +153,7 @@ struct StandardChannel
     const char*     layer_name;             // User-facing layer name
     const char*     channel_name;           // User-facing channel name
     //
-    const char*     match_list;             // List of strings to name-match to - keep upper-case!
+    const char*     match_list;             // List of strings to name-match to - keep UPPER-CASE!
     //
     const char*     dflt_io_name;           // Default file I/O channel name
     Imf::PixelType  dflt_io_pixel_type;     // Default file I/O data type
@@ -170,51 +174,54 @@ struct StandardChannel
 //
 static StandardChannel g_standard_channel_table[] =
 {
-    {"invalid",  "invalid",  "",          "",             Imf::HALF,      Chan_Invalid }, // 0 (Chan_Invalid)
+    //<usr layer>   <usr chan> <match list>  <dflt I/O name>  <dflt I/O type> <ordering index>
+    {"invalid",     "invalid",  "",             "",             Imf::HALF,  Chan_Invalid    }, // 0 (Chan_Invalid)
     //
-    //<usr layer> <usr chan> <match list> <dflt I/O name> <dflt I/O type> <ordering index>
+    // Defined in OpenEXR specs:
     //
-    { "rgba",    "R",        "R,RED",     "R",            Imf::HALF,      Chan_R         }, // 1
-    { "rgba",    "G",        "G,GREEN",   "G",            Imf::HALF,      Chan_G         }, // 2
-    { "rgba",    "B",        "B,BLUE",    "B",            Imf::HALF,      Chan_B         }, // 3
-    { "rgba",    "A",        "A,ALPHA",   "A",            Imf::HALF,      Chan_A         }, // 4
+    { "rgba",       "R",        "R,RED",        "R",            Imf::HALF,  Chan_R          }, // 1
+    { "rgba",       "G",        "G,GREEN",      "G",            Imf::HALF,  Chan_G          }, // 2
+    { "rgba",       "B",        "B,BLUE",       "B",            Imf::HALF,  Chan_B          }, // 3
+    { "rgba",       "A",        "A,ALPHA",      "A",            Imf::HALF,  Chan_A          }, // 4
     //
-    { "opacity", "R",        "AR,RA",     "AR",           Imf::HALF,      Chan_AR        }, // 5
-    { "opacity", "G",        "AG,GA",     "AG",           Imf::HALF,      Chan_AG        }, // 6
-    { "opacity", "B",        "AB,BA",     "AB",           Imf::HALF,      Chan_AB        }, // 7
+    { "opacity",    "R",        "AR,RA",        "AR",           Imf::HALF,  Chan_AR         }, // 5
+    { "opacity",    "G",        "AG,GA",        "AG",           Imf::HALF,  Chan_AG         }, // 6
+    { "opacity",    "B",        "AB,BA",        "AB",           Imf::HALF,  Chan_AB         }, // 7
     //
-    { "yuv",     "Y",        "Y",         "Y",            Imf::HALF,      Chan_Y         }, // 8
-    { "yuv",     "RY",       "RY",        "RY",           Imf::HALF,      Chan_RY        }, // 9
-    { "yuv",     "BY",       "BY",        "BY",           Imf::HALF,      Chan_BY        }, // 10
+    { "yuv",        "Y",        "Y",            "Y",            Imf::HALF,  Chan_Y          }, // 8
+    { "yuv",        "RY",       "RY",           "RY",           Imf::HALF,  Chan_RY         }, // 9
+    { "yuv",        "BY",       "BY",           "BY",           Imf::HALF,  Chan_BY         }, // 10
     //
-    { "depth",   "Z",        "Z",         "Z",            Imf::FLOAT,     Chan_Z         }, // 11
-    { "depth",   "ZFront",   "ZF,ZFRONT", "",             Imf::FLOAT,     Chan_ZFront    }, // 12 - placeholder! (TODO: ditch 'ZFront' completely and just use 'Z'...?)
-    { "depth",   "ZBack",    "ZB,ZBACK",  "ZBack",        Imf::FLOAT,     Chan_ZBack     }, // 13
+    { "depth",      "ZFront",   "ZF,ZFRONT",    "Z",            Imf::FLOAT, Chan_ZFront     }, // 11
+    { "depth",      "ZBack",    "ZB,ZBACK",     "ZBack",        Imf::FLOAT, Chan_ZBack      }, // 12
     //
-    // These are additional common channel types:
+    // Additional predefined channels:
     //
-    { "spmask",  "flags",    "FLAGS,3",   "spmask.flags", Imf::HALF,      Chan_DeepFlags }, // 14 - translate spmask.3 to spmask.flags for bkwd-compat
-    { "spmask",  "1",        "1",         "spmask.1",     Imf::FLOAT,     Chan_SpBits1   }, // 15
-    { "spmask",  "2",        "2",         "spmask.2",     Imf::FLOAT,     Chan_SpBits2   }, // 16
+    { spMask8LayerName, spMask8Chan1Name, "SP1,1",   spMask8Channel1Name, spMask8ChannelType, Chan_SpBits1   }, // 13 - translates spmask.1 for bkwd-compat
+    { spMask8LayerName, spMask8Chan1Name, "SP2,2",   spMask8Channel2Name, spMask8ChannelType, Chan_SpBits2   }, // 14 - translates spmask.2 for bkwd-compat
+    { flagsLayerName,   flagsChanName,    "FLAGS,3", flagsChannelName,    flagsChannelType,   Chan_DeepFlags }, // 15 - translates spmask.3 for bkwd-compat
     //
-    { "tex",     "s",        "S",         "tex.s",        Imf::HALF,      Chan_UvS       }, // 17 (TODO: is 'uv' a better layer name?)
-    { "tex",     "t",        "T",         "tex.t",        Imf::HALF,      Chan_UvT       }, // 18
-    { "tex",     "p",        "P",         "tex.p",        Imf::HALF,      Chan_UvP       }, // 19
-    { "tex",     "q",        "Q",         "tex.q",        Imf::HALF,      Chan_UvQ       }, // 20
+    { "cutout",     "Acut",     "",             "cutout.A",     Imf::HALF,  Chan_ACutout    }, // 16
+    { "cutout",     "ARcut",    "",             "cutout.AR",    Imf::HALF,  Chan_ARCutout   }, // 17
+    { "cutout",     "AGcut",    "",             "cutout.AG",    Imf::HALF,  Chan_AGCutout   }, // 18
+    { "cutout",     "ABcut",    "",             "cutout.AB",    Imf::HALF,  Chan_ABCutout   }, // 19
+    { "cutout",     "Zcut",     "",             "cutout.Z",     Imf::FLOAT, Chan_ZCutout    }, // 20
     //
-    { "id",      "0",        "ID,ID0",    "ID",           Imf::UINT,      Chan_ID0       }, // 21
-    { "id",      "1",        "ID1",       "ID1",          Imf::UINT,      Chan_ID1       }, // 22
-    { "id",      "2",        "ID2",       "ID2",          Imf::UINT,      Chan_ID2       }, // 23
-    { "id",      "3",        "ID3",       "ID3",          Imf::UINT,      Chan_ID3       }, // 24
+    { "accum",      "viz",      "",             "",             Imf::HALF,  Chan_Visibility }, // 21 - RESERVED, not for user exposure
+    { "accum",      "spCvg",    "",             "",             Imf::HALF,  Chan_SpCoverage }, // 22 - RESERVED, not for user exposure
     //
-    { "cutout",  "A",        "",          "cutout.A",     Imf::HALF,      Chan_CutoutA   }, // 25
-    { "cutout",  "AR",       "",          "cutout.AR",    Imf::HALF,      Chan_CutoutAR  }, // 26
-    { "cutout",  "AG",       "",          "cutout.AG",    Imf::HALF,      Chan_CutoutAG  }, // 27
-    { "cutout",  "AB",       "",          "cutout.AB",    Imf::HALF,      Chan_CutoutAB  }, // 28
-    { "cutout",  "Z",        "",          "cutout.Z",     Imf::FLOAT,     Chan_CutoutZ   }, // 29
+    { "tex",        "S",        "S",            "tex.s",        Imf::HALF,  Chan_UvS        }, // 23 (TODO: is 'uv' a better layer name?)
+    { "tex",        "T",        "T",            "tex.t",        Imf::HALF,  Chan_UvT        }, // 24
+    { "tex",        "P",        "P",            "tex.p",        Imf::HALF,  Chan_UvP        }, // 25
+    { "tex",        "Q",        "Q",            "tex.q",        Imf::HALF,  Chan_UvQ        }, // 26
+    //
+    { "id",         "0",        "ID,ID0",       "ID",           Imf::UINT,  Chan_ID0        }, // 27
+    { "id",         "1",        "ID1",          "ID1",          Imf::UINT,  Chan_ID1        }, // 28
+    { "id",         "2",        "ID2",          "ID2",          Imf::UINT,  Chan_ID2        }, // 29
+    { "id",         "3",        "ID3",          "ID3",          Imf::UINT,  Chan_ID3        }, // 30
     //
     //
-    { NULL,      NULL,       NULL,        NULL,           Imf::HALF,      Chan_Invalid } // EOT
+    { NULL,         NULL,       NULL,           NULL,           Imf::HALF,  Chan_Invalid    } // EOT
 
 };
 
@@ -222,6 +229,41 @@ static StandardChannel g_standard_channel_table[] =
 // Static map of channel-matching strings to a StandardChannel
 //
 static std::map<std::string, StandardChannel*> g_standard_channel_matching_map;
+
+
+//
+// If the kind of channel is one of the predefined ones, return
+// the common position that channel occupies in a layer.
+// i.e.
+//      kind=Chan_R -> rgba layer position 0
+//      kind=Chan_A -> rgba layer position 3
+//
+// **************************************************************
+// *                                                            *
+// *           KEEP THIS IN SYNC WITH ChannelDefs.h!            *
+// *                                                            *
+// **************************************************************
+//
+
+int
+getLayerPositionFromKind (ChannelIdx kind)
+{
+    if (kind <= Chan_Invalid || kind >= Chan_ArbitraryStart)
+        return 0; // no idea
+
+    // Determine channel position in layer from kind index:
+    if      (kind <= Chan_A)            return kind - Chan_R;           // rgba
+    else if (kind <= Chan_AB)           return kind - Chan_AR;          // opacity
+    else if (kind <= Chan_BY)           return kind - Chan_RY;          // yuv
+    else if (kind <= Chan_ZBack)        return kind - Chan_ZFront;      // depth
+    else if (kind <= Chan_DeepFlags)    return kind - Chan_SpBits1;     // spmask/flags
+    else if (kind <= Chan_ZCutout)      return kind - Chan_ACutout;     // cutouts
+    else if (kind <= Chan_SpCoverage)   return kind - Chan_Visibility;  // accumulators
+    else if (kind <= Chan_UvQ)          return kind - Chan_UvS;         // tex
+    else if (kind <= Chan_ID3)          return kind - Chan_ID0;         // ids
+
+    return 0;
+}
 
 
 //
@@ -298,7 +340,7 @@ matchStandardChannel (const char*     channel_name,
 
     // No collision, see if the name's in the matching map:
 
-    // To upper-case for matching map comparison:
+    // To upper-case for matching-map comparison:
     std::transform(name.begin(), name.end(), name.begin(), ::toupper);
 
     std::map<std::string, StandardChannel*>::iterator it = g_standard_channel_matching_map.find(name);
@@ -312,39 +354,6 @@ matchStandardChannel (const char*     channel_name,
     std_io_type    = it->second->dflt_io_pixel_type;
 
     return true;
-}
-
-
-//
-// If the kind of channel is one of the predefined ones, return
-// the common position that channel occupies in a layer.
-// This allows channel names to 
-// i.e.
-//      if kind==Chan_R -> rgba position 0
-//      if kind==Chan_A -> rgba position 3
-//
-
-int
-getLayerPositionFromKind (ChannelIdx kind)
-{
-    if (kind <= Chan_Invalid || kind >= Chan_ArbitraryStart)
-        return 0; // no idea
-
-    // Determine layer position from kind.
-    if      (kind <= Chan_A)          return kind - Chan_R;   // rgba
-    else if (kind <= Chan_AB)         return kind - Chan_AR;  // opacity
-    else if (kind <= Chan_BY)         return kind - Chan_RY;  // yuv
-    else if (kind == Chan_Z || kind == Chan_ZFront) return 0; // depth
-    else if (kind == Chan_ZBack)      return 1;               // depth
-    else if (kind <= Chan_SpBitsLast) return kind - Chan_DeepFlags; // spmask
-    else if (kind <= Chan_UvQ)        return kind - Chan_UvS; // tex
-#if 0
-    // TODO: how to handle more obscure layers?
-    else if (kind <= Chan_ID3)        return kind - Chan_ID0; // id
-    else if (kind <= Chan_CutoutZ)    return kind - Chan_CutoutA; // cutout
-#endif
-
-    return 0;
 }
 
 
@@ -365,13 +374,15 @@ std::ostream&
 operator << (std::ostream& os,
              const ChannelSet::iterator& it)
 {
-    return os << it.channel();
+    if (it < Chan_ArbitraryStart)
+        return os << g_standard_channel_table[it].channel_name;
+    return os << it;
 }
 
 //
 // Print channel or layer.channel name to output stream.
 // If the ChannelContext is NULL only the ChannelIdx number will be
-// printed, otherwise the channel names will.
+// printed for arbitrary channels.
 //
 
 void ChannelSet::print (const char* prefix,
@@ -387,7 +398,7 @@ void ChannelSet::print (const char* prefix,
         if (ctx)
             ctx->printChannelFullName(os, *m_mask.begin());
         else
-            os << *m_mask.begin();
+            os << m_mask.begin();
     else
     {
         int i = 0;
@@ -398,14 +409,14 @@ void ChannelSet::print (const char* prefix,
             if (ctx)
                 ctx->printChannelFullName(os, *z);
             else
-                os << *z;
+                os << z;
         }
     }
     os << "]";
 }
 
 //
-// Outputs the ChannelIdx number of the channels to the stream
+// Outputs the names for predefined channels and index numbers for arbitrary channels.
 //
 
 /*friend*/
@@ -424,12 +435,13 @@ operator << (std::ostream& os,
 //
 //-----------------------------------------------------------------------------
 
-ChannelAlias::ChannelAlias (const char*    name,
-                            const char*    layer,
-                            ChannelIdx     channel,
-                            uint32_t       position,
-                            const char*    io_name,
-                            Imf::PixelType io_type) :
+ChannelAlias::ChannelAlias (const char*     name,
+                            const char*     layer,
+                            ChannelIdx      channel,
+                            uint32_t        position,
+                            const char*     io_name,
+                            Imf::PixelType  io_type,
+                            int             io_part) :
     m_name(name),
     m_layer(layer),
     //
@@ -437,8 +449,8 @@ ChannelAlias::ChannelAlias (const char*    name,
     m_position(position),
     //
     m_io_name(io_name),
-    m_io_type(io_type)
-    //m_io_part(io_part)
+    m_io_type(io_type),
+    m_io_part(io_part)
 {
     //
 }
@@ -459,7 +471,7 @@ ChannelAlias& ChannelAlias::operator = (const ChannelAlias& b)
     m_position = b.m_position;
     m_io_name  = b.m_io_name;
     m_io_type  = b.m_io_type;
-    //m_io_part  = b.m_io_part;
+    m_io_part  = b.m_io_part;
     return *this;
 }
 
@@ -535,8 +547,50 @@ ChannelContext::ChannelContext(bool addStandardChans) :
 /*virtual*/
 ChannelContext::~ChannelContext()
 {
-    for (size_t i=0; i < m_channelalias_list.size(); i++)
+    for (size_t i=0; i < m_channelalias_list.size(); ++i)
         delete m_channelalias_list[i];
+}
+
+
+ChannelSet
+ChannelContext::getChannels()
+{
+    ChannelSet channels(Mask_None);
+    for (size_t i=0; i < m_channelalias_list.size(); ++i)
+        channels += m_channelalias_list[i]->channel();
+    return channels;
+}
+
+ChannelSet
+ChannelContext::getChannelSetFromAliases(const ChannelAliasPtrList& alias_list)
+{
+    ChannelSet channels(Mask_None);
+    for (size_t i=0; i < alias_list.size(); ++i)
+    {
+        const ChannelAlias* c = alias_list[i];
+        if (!c || c->channel() == Chan_Invalid)
+            continue; // don't crash
+        const ChannelAlias* c1 = findChannelAlias(c->fullName());
+        if (c1 && c1->channel() == c->channel())
+            channels += c->channel();
+    }
+    return channels;
+}
+
+ChannelSet
+ChannelContext::getChannelSetFromAliases(const ChannelAliasPtrSet& alias_set)
+{
+    ChannelSet channels(Mask_None);
+    for (ChannelAliasPtrSet::const_iterator it=alias_set.begin(); it != alias_set.end(); ++it)
+    {
+        const ChannelAlias* c = *it;
+        if (!c || c->channel() == Chan_Invalid)
+            continue; // don't crash
+        const ChannelAlias* c1 = findChannelAlias(c->fullName());
+        if (c1 && c1->channel() == c->channel())
+            channels += c->channel();
+    }
+    return channels;
 }
 
 
@@ -552,7 +606,8 @@ ChannelContext::addStandardChannels()
                         c->ordering_index,
                         getLayerPositionFromKind(c->ordering_index),
                         c->dflt_io_name,
-                        c->dflt_io_pixel_type);
+                        c->dflt_io_pixel_type,
+                        0/*io_part*/);
     }
 }
 
@@ -675,14 +730,16 @@ ChannelContext::addChannelAlias (const std::string& chan_name,
                                  ChannelIdx         channel,
                                  uint32_t           position,
                                  const std::string& io_name,
-                                 Imf::PixelType     io_type)
+                                 Imf::PixelType     io_type,
+                                 int                io_part)
 {
     return addChannelAlias(new ChannelAlias(chan_name.c_str(),
                                             layer_name.c_str(),
                                             channel,
                                             position,
                                             io_name.c_str(),
-                                            io_type));
+                                            io_type,
+                                            io_part));
 }
 
 
@@ -691,11 +748,13 @@ ChannelContext::addChannelAlias (const std::string& chan_name,
 // Return a ChannelAlias or NULL if not able to create it.
 //
 // TODO: This logic is a little confused atm - make sure there's a clear way to
-// repeatedly map the same channel name to the same alias.
-// For example, when a standard channel is matched we only create a single alias using the original
-// chan name which may confuse things if the name gets remapped (spmask.3->spmask.flags)
+//      repeatedly map the same channel name to the same alias.
+//      For example, when a standard channel is matched we only create a single
+//      alias using the original chan name which may confuse things if the name
+//      gets remapped (ie. spmask.3->deepdcx.flags)
 //
-// We should create two aliases, one with the provided name and one with the standard name.
+//      We should likely create two aliases, one with the provided name and one
+//      with the standard name.
 //
 
 ChannelAlias*
@@ -717,7 +776,7 @@ ChannelContext::getChannelAlias (const char* name)
     int position = 0;
 
     // Does channel string corresponds to any standard ones? If so we
-    // can determine the 'kind' of channel from it:
+    // can determine the 'kind' of channel:
     std::string    std_layer_name = "";
     std::string    std_chan_name  = "";
     std::string    std_io_name    = "";
@@ -761,15 +820,15 @@ ChannelContext::getChannelAlias (const char* name)
             return chan;
     }
 
-    // Create new alias, and possibly a new layer.
-    // If channel is still Chan_Invalid it will get assigned to next
-    // available slot when added to context:
+    // Create new alias, and possibly a new layer. If channel is still Chan_Invalid
+    // it will get assigned the next available channel slot when added to context:
     chan = addChannelAlias(chan_name,
                            layer_name,
                            channel,
                            position,
                            std_io_name,
-                           std_io_type);
+                           std_io_type,
+                           0/*io_part*/);
     if (!chan)
         return NULL; // shouldn't happen...
 

@@ -40,26 +40,43 @@
 
 #include <OpenDCX/DcxDeepPixel.h>
 
+#include "DDImageAdapter.h" // for spmask nuke channel assignments
+
+
+//
+//  DeepMatte
+//  DeepSurfaceType
+//
+//      An example Nuke plugin that sets or clears the per-sample flags.
+//
+//      DeepMatte defaults to setting the Dcx::DeepFlags::MATTE_OBJECT flag,
+//      marking the deep samples as matte which will cutout (blacken) objects
+//      behind them, including the alpha channel.
+//      
+//      DeepSurfaceType exposes all the flag controls allowing the hard-surface,
+//      matte-object and additive flags to be changed.
+//
+
 using namespace DD::Image;
+
 
 enum { FLAG_SET, FLAG_CLEAR, FLAG_NOCHANGE };
 const char* const flag_modes[] = { "set", "clear", "no-change", 0 };
-
 
 
 /*!
 */
 class DeepMatte : public DeepFilterOp {
 protected:
-    int                 k_surface_mode;         //!< How to handle the surface-type (log/lin) flag
-    bool                k_fill_spmask;          //!< Fill subpixel mask of non-zero pixels with all ones
-    int                 k_matte_mode;           //!< How to handle the matte flag
-    bool                k_black_rgb;            //!< Set RGB channels to 0
-    int                 k_additive_mode;        //!< How to handle the additive flag
-    DD::Image::Channel  k_spmask_channel[2];    //!< Subpixel mask channels
-    DD::Image::Channel  k_flags_channel;        //!< Per-sample flags channel
+    int                     k_surface_mode;         //!< How to handle the surface-type (log/lin) flag
+    bool                    k_fill_spmask;          //!< Fill subpixel mask of non-zero pixels with all ones
+    int                     k_matte_mode;           //!< How to handle the matte flag
+    bool                    k_black_rgb;            //!< Set RGB channels to 0
+    int                     k_additive_mode;        //!< How to handle the additive flag
+    DD::Image::Channel      k_spmask_channel[2];    //!< Per-sample subpixel mask channels
+    DD::Image::Channel      k_flags_channel;        //!< Per-sample flags channel
     //
-    DD::Image::ChannelSet m_spmask_channels;
+    DD::Image::ChannelSet   m_spmask_channels;
 
 public:
     static const Description description;
@@ -67,20 +84,21 @@ public:
     /*virtual*/ const char* node_help() const { return __DATE__ " " __TIME__ "\n"
         "Modify the matte-object flag on each sample.\n"
         "\n"
-        "The matte-object flag is normally stored on the 'spmask.flags' channel which also "
-        "contains the log/lin interpolation flag.  The flag bitmask values are:\n"
-        "   DEEP_LINEAR_INTERP_SAMPLE = 0x01\n"
-        "   DEEP_MATTE_OBJECT_SAMPLE  = 0x02\n"
-        "   DEEP_ADDITIVE_SAMPLE      = 0x04\n"
+        "The matte-object flag is normally stored in the 'spmask.flags' channel which also "
+        "contains the log/lin interpolation flag and partial-subpixel coverage weight. The "
+        "flag bitmask values are:\n"
+        "   LINEAR_INTERP = 0x01\n"
+        "   MATTE_OBJECT  = 0x02\n"
+        "   ADDITIVE      = 0x04\n"
         "\n"
         "When deep pixels are flattened (DeepToImage, DeepCamDefocus) the matte-object "
         "flag is used to make sure the alpha channel is properly cut out.";
     }
 
     DeepMatte(Node* node) : DeepFilterOp(node) {
-        k_spmask_channel[0] = DD::Image::getChannel(Dcx::spMask8ChannelName1);
-        k_spmask_channel[1] = DD::Image::getChannel(Dcx::spMask8ChannelName2);
-        k_flags_channel     = DD::Image::getChannel(Dcx::flagsChannelName);
+        // Get OpenDCX standard channels assigned in the correct order:
+        Dcx::dcxGetSpmaskChannels(k_spmask_channel[0], k_spmask_channel[1], k_flags_channel);
+        //
         k_surface_mode      = FLAG_NOCHANGE;
         k_fill_spmask       = false;
         k_matte_mode        = FLAG_SET;
@@ -235,24 +253,24 @@ public:
 
                     } else if (z == k_flags_channel && modify_flags) {
                         // Modify the flags:
-                        Dcx::DeepFlag flags = Dcx::DEEP_EMPTY_FLAG;
+                        Dcx::DeepFlags flags = Dcx::DeepFlags::ALL_BITS_OFF;
                         if (input_channels.contains(k_flags_channel))
-                            flags = (int)floorf(in_pixel.getUnorderedSample(i, z));
+                            flags.fromFloat(in_pixel.getUnorderedSample(i, z));
                         //
                         if (k_surface_mode == FLAG_SET)
-                            flags |= Dcx::DEEP_LINEAR_INTERP_SAMPLE;
+                            flags.setSurfaceFlags(Dcx::DeepFlags::LINEAR_INTERP);
                         else if (k_surface_mode == FLAG_CLEAR)
-                            flags &= ~Dcx::DEEP_LINEAR_INTERP_SAMPLE;
+                            flags.clearSurfaceFlags(Dcx::DeepFlags::LINEAR_INTERP);
                         if (k_matte_mode == FLAG_SET)
-                            flags |= Dcx::DEEP_MATTE_OBJECT_SAMPLE;
+                            flags.setSurfaceFlags(Dcx::DeepFlags::MATTE_OBJECT);
                         else if (k_matte_mode == FLAG_CLEAR)
-                            flags &= ~Dcx::DEEP_MATTE_OBJECT_SAMPLE;
+                            flags.clearSurfaceFlags(Dcx::DeepFlags::MATTE_OBJECT);
                         if (k_additive_mode == FLAG_SET)
-                            flags |= Dcx::DEEP_ADDITIVE_SAMPLE;
+                            flags.setSurfaceFlags(Dcx::DeepFlags::ADDITIVE);
                         else if (k_additive_mode == FLAG_CLEAR)
-                            flags &= ~Dcx::DEEP_ADDITIVE_SAMPLE;
+                            flags.clearSurfaceFlags(Dcx::DeepFlags::ADDITIVE);
                         //
-                        out_pixel.push_back(float(flags));
+                        out_pixel.push_back(flags.toFloat());
 
                     } else if (black_channels.contains(z)) {
                         // Blacken channel:
@@ -289,11 +307,11 @@ public:
     /*virtual*/ const char* node_help() const { return __DATE__ " " __TIME__ "\n"
         "Modify the deep sample flags on each sample.\n"
         "\n"
-        "The surface-type, matte-object and additive-mode flags are stored on the "
+        "The surface-type, matte-object and additive-mode flags are stored in the "
         "'spmask.flags' channel. The flag bitmask values are:\n"
-        "   DEEP_LINEAR_INTERP_SAMPLE = 0x01\n"
-        "   DEEP_MATTE_OBJECT_SAMPLE  = 0x02\n"
-        "   DEEP_ADDITIVE_SAMPLE      = 0x04\n"
+        "   LINEAR_INTERP = 0x01\n"
+        "   MATTE_OBJECT  = 0x02\n"
+        "   ADDITIVE      = 0x04\n"
         "\n"
         "When deep pixels are flattened (DeepToImage, DeepCamDefocus) the flags "
         "are used to modify the merging math per-sample.";

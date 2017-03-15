@@ -95,19 +95,19 @@ ifeq (no,$(strip $(shared)))
     OPENEXR_LIBS := \
         $(OPENEXR_LIB_DIR)/libIlmImfUtil.a \
         $(OPENEXR_LIB_DIR)/libIlmImf.a \
-        $(OPENEXR_LIB_DIR)/libIex.a \
         $(OPENEXR_LIB_DIR)/libImath.a \
-        $(OPENEXR_LIB_DIR)/libHalf.a \
-        $(OPENEXR_LIB_DIR)/libIlmThread.a
+        $(OPENEXR_LIB_DIR)/libIlmThread.a \
+        $(OPENEXR_LIB_DIR)/libIex.a \
+        $(OPENEXR_LIB_DIR)/libHalf.a
 else
     OPENDCX_LIBS := -lOpenDCX
     OPENEXR_LIBS := \
         -lIlmImfUtil \
-	-lIlmImf \
-	-lIex \
-	-lImath \
-	-lHalf \
-	-lIlmThread
+        -lIlmImf \
+        -lImath \
+        -lIlmThread \
+        -lIex \
+        -lHalf
 endif #shared
 
 

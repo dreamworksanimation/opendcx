@@ -38,18 +38,27 @@
 #ifndef INCLUDED_DCX_DEEPTILE_H
 #define INCLUDED_DCX_DEEPTILE_H
 
-//-----------------------------------------------------------------------------
+//=============================================================================
 //
 //  class  DeepTile
 //
-//-----------------------------------------------------------------------------
+//=============================================================================
 
+#include "DcxPixelTile.h"
 #include "DcxDeepPixel.h"
 #include "DcxChannelAlias.h"
 
-#include <OpenEXR/ImathBox.h>
 
-//----------------------------------------------------------------------------------------------------
+//-------------------------
+//!rst:cpp:begin::
+//.. _deeptile_class:
+//
+//DeepTile
+//========
+//-------------------------
+
+
+//=============================================================================
 // TODO: this seems missing from IlmBase...where to put this...?
 template <class T>
 std::ostream&
@@ -59,47 +68,49 @@ operator << (std::ostream& os,
     os << "[" << b.min.x << " " << b.min.y << " " << b.max.x << " " << b.max.y << "]";
     return os;
 }
+//=============================================================================
 
-//----------------------------------------------------------------------------------------------------
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
 
+//=====================
+//
+//  class DeepTile
+// 
+//=====================
 //-----------------------------------------------------------------------------
 //
-// class DeepTile
+//  PixelTile class to manage deep pixels.
 //
-//      Abstract class to manage a rectangular section of deep pixels.
+//  This class is intended for simplifing common pixel-region loops that
+//  step from pixel to pixel processing multiple channels simultaneously,
+//  vs. using the IlmImfUtil deep classes which seem organized more for
+//  per-plane processing and more targeted for deep texture use.
 //
-//      This class is intended for simplifing common pixel-region loops that
-//      step from pixel to pixel processing multiple channels simultaneously,
-//      vs. using the IlmImfUtil deep classes which seem organized more for
-//      per-plane processing and more targeted for deep texture use.
-//
-//      See the DeepImageTile classes for an example that wraps the IlmImfUtil
-//      DeepImage class.
+//  See the DeepImageTile classes for an example that wraps the IlmImfUtil
+//  DeepImage class.
 //
 //-----------------------------------------------------------------------------
 
-class DCX_EXPORT DeepTile
+class DCX_EXPORT DeepTile : public PixelTile
 {
   public:
 
-    //----------------------------------------------------------------------
+    //-------------------------------------------------------------------------------
     //
-    // Hints at how the tile should be spatially accessed during writing of
-    // deep pixels.
-    // Some memory arrangements allow only sequential writing of the entire
-    // tile buffer in order while others want it restricted per-scanline.
+    // Hints at how the tile should be spatially accessed during writing of pixels.
+    // Some memory arrangements allow only sequential writing of the entire tile
+    // buffer in order while others want it restricted per-scanline.
     //
-    //----------------------------------------------------------------------
+    //-------------------------------------------------------------------------------
 
     enum WriteAccessMode
     {
-        WRITE_DISABLED,         // Cannot write to tile
+        WRITE_DISABLED,         // Cannot write to this tile
         WRITE_RANDOM,           // Any x,y pixel can be written to randomly
         WRITE_RANDOM_SCANLINE,  // Scanlines can be written randomly but pixels must be written in order (x argument ignored)
-        WRITE_SEQUENTIAL        // Entire tile must be written in order (x & y arguments ignored)
+        WRITE_SEQUENTIAL        // Entire tile must be written in sequential order (x & y arguments ignored)
     };
 
 
@@ -107,11 +118,24 @@ class DCX_EXPORT DeepTile
 
     //
     // Must provide a ChannelContext at a minimum.
+    // Data and display windows are set to invalid value [0 0 -1 -1]
     //
 
     DeepTile (ChannelContext& channel_ctx,
               WriteAccessMode write_access_mode=WRITE_DISABLED,
-              bool tileYup=true);
+              bool yAxisUp=true);
+
+    //
+    // Gets resolution info and channel set from header.
+    // The set of ChannelAliases is used to construct a map of ChannelIdx's to
+    // ChannelAliases.  If multiple input ChannelAliases have the same ChannelIdx
+    // destination only the first one is accepted and the others are ignored.
+    //
+
+    DeepTile (const Imf::Header&,
+              ChannelContext& channel_ctx,
+              WriteAccessMode write_access_mode=WRITE_DISABLED,
+              bool yAxisUp=true);
 
     //
     // Assigns resolution and channel set.
@@ -119,90 +143,32 @@ class DCX_EXPORT DeepTile
     // ChannelAliases.  If multiple input ChannelAliases have the same ChannelIdx
     // destination only the first one is accepted and the others are ignored.
     //
+    // display_window is only used to set the window-top reference.
+    //
 
     DeepTile (const IMATH_NAMESPACE::Box2i& display_window,
               const IMATH_NAMESPACE::Box2i& data_window,
               bool sourceWindowsYup,
-              const ChannelAliasPtrSet& channels,
-              ChannelContext&  channel_ctx,
+              const ChannelSet& channels,
+              ChannelContext& channel_ctx,
               WriteAccessMode write_access_mode=WRITE_DISABLED,
-              bool tileYup=true);
-
-    virtual ~DeepTile ();
-
-
-    //
-    // Are the data/display windows Y-up?  If true pixel access
-    // method Y-coordinates are interpreted as Y-up.
-    //
-
-    bool    tileYup() const;
-
-
-    const IMATH_NAMESPACE::Box2i&   dataWindow () const;
-    int     x () const;
-    int     y () const;
-    int     r () const;
-    int     t () const;
-    int     w () const;
-    int     h () const;
-
-
-    const IMATH_NAMESPACE::Box2i&   displayWindow () const;
-    int     fx () const;
-    int     fy () const;
-    int     fr () const;
-    int     ft () const;
-    int     fw () const;
-    int     fh () const;
+              bool yAxisUp=true);
+    DeepTile (const IMATH_NAMESPACE::Box2i& data_window,
+              int top_reference,
+              bool sourceWindowsYAxisUp,
+              const ChannelSet& channels,
+              ChannelContext& channel_ctx,
+              WriteAccessMode write_access_mode=WRITE_DISABLED,
+              bool yAxisUp=true);
 
 
     //
-    // ChannelSet for tile, derived from channelAliasSet.
+    // Assign the active ChannelSet.
+    // If spmask or flag channels are in the set this will update the spmask channel
+    // count and the flags channel.
     //
 
-    const Dcx::ChannelSet&  channels () const;
-
-
-    //
-    // Number of color/aov channels in each DeepPixel.
-    //
-
-    size_t  numChannels () const;
-
-
-    //
-    // Map of ChannelIdx->ChannelAliases assigned to this tile.
-    //
-
-    const ChannelIdxToAliasMap& channelAliasMap () const;
-
-
-    //
-    // Return a ChannelAlias pointer corresponding to a ChannelIdx
-    //
-
-    const ChannelAlias* getChannelAlias(ChannelIdx) const;
-
-
-    //
-    // Hints at how the tile should be spatially accessed during writing of
-    // deep pixels.
-    //
-
-    WriteAccessMode writeAccessMode () const;
-
-
-    bool    writable() const;
-    bool    hasSpMasks () const;
-    bool    hasFlags () const;
-
-
-    //
-    // Returns true if pixel x,y is inside data window.
-    //
-
-    bool isActivePixel (int x, int y) const;
+    /*virtual*/ void setChannels (const ChannelSet& channels);
 
 
     //
@@ -252,79 +218,55 @@ class DCX_EXPORT DeepTile
     virtual bool clearDeepPixel (int x,
                                  int y);
 
+
+    //
+    // Hints at how the tile should be spatially accessed during writing of
+    // pixels.
+    //
+
+    WriteAccessMode writeAccessMode () const;
+    bool            writable() const;
+
+
+    //
+    // Does the tile contain channels for sample metadata storage?
+    //
+
+    bool    hasSpMasks () const;
+    bool    hasFlags () const;
+
+
+
   protected:
     //
-    // Copy constructor only for subclasses
+    // Copy constructor only for subclasses.
     //
     DeepTile (const DeepTile&);
 
-    //
-    // Build the active ChannelSet from a set of ChannelAliases.
-    // Also updates the ChannelAliasMap.
-    // If spmask or flag channels are in the set this will update the
-    // spmask channel count and the flags channel.
-    //
-    virtual void updateChannels (const ChannelAliasPtrSet& channels);
 
-    // Assigned vars:
-    WriteAccessMode         m_write_access_mode;    // Supported spatial write-access mode
-    bool                    m_tile_yUp;             // Is Y-axis of tile pointing up(industry-std) or down(exr-std)?
-    IMATH_NAMESPACE::Box2i  m_display_window;       // Bbox of target format (normally the displayWindow)
-    IMATH_NAMESPACE::Box2i  m_data_window;          // Bbox of active pixel area, *** possibly flipped in Y ***!
-    ChannelContext*         m_channel_ctx;          // Context for channels
-
-    // Derived vars:
-    Dcx::ChannelSet         m_channels;             // ChannelSet shared by all pixels in tile
-    ChannelIdxToAliasMap    m_channel_aliases;      // Map of ChannelIdx->ChannelAliases
-    size_t                  m_num_spmask_chans;     // Number of active SpMask channels (1-8) - TODO: deprecate!
-    Dcx::ChannelIdx         m_flags_channel;        // Flags channel
+    WriteAccessMode     m_write_access_mode;    // Spatial write-access mode
+    Dcx::ChannelIdx     m_spmask_channel[2];    // SpMask8 channels - active if not Chan_Invalid
+    Dcx::ChannelIdx     m_flags_channel;        // Flags channel - active if not Chan_Invalid
 
 };
 
 
 
+//--------------
+//!rst:cpp:end::
+//--------------
+
 //-----------------
 // Inline Functions
 //-----------------
-
-inline bool DeepTile::tileYup () const { return m_tile_yUp; }
-inline const IMATH_NAMESPACE::Box2i& DeepTile::displayWindow () const { return m_display_window; }
-inline const IMATH_NAMESPACE::Box2i& DeepTile::dataWindow () const { return m_data_window; }
-inline const Dcx::ChannelSet& DeepTile::channels () const { return m_channels; }
-inline const ChannelIdxToAliasMap& DeepTile::channelAliasMap () const { return m_channel_aliases; }
-inline const ChannelAlias* DeepTile::getChannelAlias(ChannelIdx z) const
-{
-    ChannelIdxToAliasMap::const_iterator it = m_channel_aliases.find(z);
-    if (it == m_channel_aliases.end())
-        return NULL;
-    return it->second;
-}
+inline bool DeepTile::setDeepPixel (int, int, const Dcx::DeepPixel&) { return false; }
+inline bool DeepTile::clearDeepPixel (int, int) { return false; }
+//
 inline DeepTile::WriteAccessMode DeepTile::writeAccessMode () const { return m_write_access_mode; }
 inline bool DeepTile::writable () const { return (m_write_access_mode > WRITE_DISABLED); }
-inline
-bool DeepTile::isActivePixel (int x, int y) const { return !(x < m_data_window.min.x || y < m_data_window.min.y ||
-                                                             x > m_data_window.max.x || y > m_data_window.max.y); }
-inline size_t DeepTile::numChannels () const { return m_channels.size(); }
-inline int DeepTile::x () const { return m_data_window.min.x; }
-inline int DeepTile::y () const { return m_data_window.min.y; }
-inline int DeepTile::r () const { return m_data_window.max.x; }
-inline int DeepTile::t () const { return m_data_window.max.y; }
-inline int DeepTile::w () const { return (m_data_window.max.x - m_data_window.min.x + 1); }
-inline int DeepTile::h () const { return (m_data_window.max.y - m_data_window.min.y + 1); }
-inline int DeepTile::fx () const { return m_display_window.min.x; }
-inline int DeepTile::fy () const { return m_display_window.min.y; }
-inline int DeepTile::fr () const { return m_display_window.max.x; }
-inline int DeepTile::ft () const { return m_display_window.max.y; }
-inline int DeepTile::fw () const { return (m_display_window.max.x - m_display_window.min.x + 1); }
-inline int DeepTile::fh () const { return (m_display_window.max.y - m_display_window.min.y + 1); }
-inline
-bool DeepTile::hasSpMasks () const { return (m_num_spmask_chans > 0); }
-inline
-bool DeepTile::hasFlags () const { return (m_flags_channel != Dcx::Chan_Invalid); }
-inline
-bool DeepTile::setDeepPixel (int, int, const Dcx::DeepPixel&) { return false; }
-inline
-bool DeepTile::clearDeepPixel (int, int) { return false; }
+//
+inline bool DeepTile::hasSpMasks () const { return (m_spmask_channel[0] != Dcx::Chan_Invalid && m_spmask_channel[1] != Dcx::Chan_Invalid); }
+inline bool DeepTile::hasFlags () const { return (m_flags_channel != Dcx::Chan_Invalid); }
 
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_EXIT

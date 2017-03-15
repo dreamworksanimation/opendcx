@@ -52,6 +52,7 @@
 #include <OpenEXR/ImfHeader.h>
 #include <OpenEXR/ImfDeepImageIO.h>
 #include <OpenEXR/ImathMatrix.h>
+#include <OpenEXR/ImfBoxAttribute.h>
 
 #include <OpenDCX/DcxChannelContext.h>
 #include <OpenDCX/DcxDeepImageTile.h>
@@ -70,57 +71,62 @@
 typedef uint64_t SurfaceID;
 
 
-struct MyRay
+struct SimpleRay
 {
     Imath::V3f  origin;
     Imath::V3f  dir;
 };
 
-struct MyCamera
+struct SimpleRayCamera
 {
-    Imath::M44f matrix;
-    float       lens;                       // lens magnification
-    float       fX, fY, fR, fT, fW, fH;     // float extents of viewport
-    float       fWinAspect;                 // aspect ratio of viewport
+    Imath::M44f     matrix;     // world xform
+    float           lensScale;  // lens magnification (horiz-aperture / focal-length)
+    Imath::V2f      apCenter;   // pixel center of camera aperture (ndc 0,0)
+    Imath::V2f      apScale;    // pixel scale to ndc - always normalize x to -1..+1, y applies pixel aspect ratio
 
-    MyCamera(const Imath::V3f& translate,
-             const Imath::V3f& rotate_degrees,
-             float focalLength,
-             float hAperture,
-             const Imath::Box2i& format,
-             float pixel_aspect) :
-        fX(format.min.x),
-        fY(format.min.y),
-        fR(format.max.x),
-        fT(format.max.y),
-        fW(format.max.x - format.min.x + 1),
-        fH(format.max.y - format.min.y + 1)
+    SimpleRayCamera (const Imath::V3f&   translate,
+                     const Imath::V3f&   rotate_degrees,
+                     float               focal_length,
+                     float               horiz_aperture,
+                     const Imath::Box2i& aperture_window,
+                     float               pixel_aspect) :
+        lensScale(horiz_aperture / focal_length),
+        apCenter((aperture_window.max.x + aperture_window.min.x + 1)/2.0f,
+                 (aperture_window.max.y + aperture_window.min.y + 1)/2.0f)
     {
+        apScale.x = 2.0f / float(aperture_window.max.x - aperture_window.min.x + 1);
+        apScale.y = apScale.x / pixel_aspect;
         matrix.makeIdentity();
         matrix.rotate(Imath::V3f(radians(rotate_degrees.x),
                                  radians(rotate_degrees.y),
                                  radians(rotate_degrees.z)));
         matrix.translate(translate);
-        lens = hAperture / focalLength;
-        fWinAspect = (fH / fW)/pixel_aspect; // Image aspect with pixel-aspect mixed in
     }
 
+    // Transforms a pixel coordinate to NDC space
     inline
-    void getNdcCoord(float pixelX, float pixelY,
-                     float& u, float& v) const
+    void    getNdcCoord (float pixelX, float pixelY,
+                         Imath::V2f& ndc_uv) const
     {
-        u = (pixelX - fX)/fW*2.0f - 1.0f;
-        v = (pixelY - fY)/fH*2.0f - 1.0f;
+        ndc_uv = (Imath::V2f(pixelX, pixelY) - apCenter)*apScale;
     }
 
+    // Place and orient a ray in world space for pixel XY
     inline
-    void buildRay(float pixelX, float pixelY, MyRay& R) const
+    void    buildRay (float pixelX, float pixelY,
+                      SimpleRay& R) const
     {
-        float u, v;
-        getNdcCoord(pixelX, pixelY, u, v);
-        //
         R.origin = matrix.translation();
-        matrix.multDirMatrix(Imath::V3f(u*lens*0.5f, v*lens*0.5f*fWinAspect, -1.0f), R.dir);
+
+        // Build direction vector:
+        Imath::V2f ndc_uv;
+        getNdcCoord(pixelX, pixelY, ndc_uv);
+        //
+        // Apply filmback transforms here
+        //
+        ndc_uv *= lensScale*0.5f;
+        // 
+        matrix.multDirMatrix(Imath::V3f(ndc_uv.x, ndc_uv.y, -1.0f), R.dir);
         R.dir.normalize();
     }
 };
@@ -136,7 +142,7 @@ struct MySphere
     SurfaceID   surfID;
 
     inline
-    bool intersect(const MyRay& R,
+    bool intersect(const SimpleRay& R,
                    double& tmin,
                    double& tmax,
                    Imath::V3f& P,
@@ -216,12 +222,13 @@ typedef std::map<SurfaceID, DeepSurfaceIntersectionList> DeepSurfaceIntersection
 void
 usageMessage (const char argv0[], bool verbose=false)
 {
-    std::cerr << "usage: " << argv0 << " [options] infile" << std::endl;
+    std::cerr << "usage: " << argv0 << " [options] infile outfile" << std::endl;
 
     if (verbose)
     {
         std::cerr << "\n"
-                "Print info about a deep pixel or line of deep pixels\n"
+                "Converts input deep pixels into sphere primitives which are ray traced multiple\n"
+                "times at each output pixel producing new deep pixels with subpixel masks.\n"
                 "\n"
                 "Options:\n"
                 "  -skip <n>       read every nth input pixel when creating spheres (default 8)\n"
@@ -236,6 +243,8 @@ usageMessage (const char argv0[], bool verbose=false)
                 "  -camr <x><y><z> camera rotation (default 0,0,0)\n"
                 "  -camfl <v>      camera focal-length (default 50.0)\n"
                 "  -camha <v>      camera horizontal aperture (default 24.0)\n"
+                "\n"
+                "  -apwin <x><y><r><t> camera aperture in pixels (default is input displayWindow)\n"
                 "\n"
                 "  -v              print additional info\n"
                 "  -h              prints this message\n";
@@ -266,6 +275,8 @@ main (int argc, char *argv[])
     float camFocal = 50.0f;
     float camHaper = 24.0f;
     //
+    Imath::Box2i apertureWindow(Imath::V2i(0,0), Imath::V2i(-1,-1));
+    //
     bool  verbose = false;
 
     //
@@ -284,7 +295,7 @@ main (int argc, char *argv[])
                 // Input pixel-skip rate:
                 if (i > argc - 2)
                     usageMessage(argv[0]);
-                skipPixel = (int)floor(strtol(argv[i + 1], 0, 0));
+                skipPixel = (int)strtol(argv[i + 1], 0, 0);
                 i += 2;
             }
             else if (!strcmp(argv[i], "-scale"))
@@ -292,7 +303,7 @@ main (int argc, char *argv[])
                 // Sphere scale factor:
                 if (i > argc - 2)
                     usageMessage(argv[0]);
-                scaleSpheres = fabs(strtol(argv[i + 1], 0, 0));
+                scaleSpheres = fabs(strtod(argv[i + 1], NULL));
                 i += 2;
             }
             else if (!strcmp(argv[i], "-sp"))
@@ -300,7 +311,7 @@ main (int argc, char *argv[])
                 // Subpixel rate:
                 if (i > argc - 2)
                     usageMessage(argv[0]);
-                subpixelXRate = std::max(1, (int)floor(strtol(argv[i + 1], 0, 0)));
+                subpixelXRate = std::max(1, (int)strtol(argv[i + 1], 0, 0));
                 subpixelYRate = subpixelXRate;
                 i += 2;
             }
@@ -309,7 +320,7 @@ main (int argc, char *argv[])
                 // Subpixel X rate:
                 if (i > argc - 2)
                     usageMessage(argv[0]);
-                subpixelXRate = std::max(1, (int)floor(strtol(argv[i + 1], 0, 0)));
+                subpixelXRate = std::max(1, (int)strtol(argv[i + 1], 0, 0));
                 i += 2;
             }
             else if (!strcmp(argv[i], "-spY"))
@@ -317,7 +328,7 @@ main (int argc, char *argv[])
                 // Subpixel Y rate:
                 if (i > argc - 2)
                     usageMessage(argv[0]);
-                subpixelYRate = std::max(1, (int)floor(strtol(argv[i + 1], 0, 0)));
+                subpixelYRate = std::max(1, (int)strtol(argv[i + 1], 0, 0));
                 i += 2;
             }
             else if (!strcmp(argv[i], "-zthresh"))
@@ -325,7 +336,7 @@ main (int argc, char *argv[])
                 // Subpixel rate:
                 if (i > argc - 2)
                     usageMessage(argv[0]);
-                deepCombineZThreshold = fabs(strtol(argv[i + 1], 0, 0));
+                deepCombineZThreshold = fabs(strtod(argv[i + 1], NULL));
                 i += 2;
             }
             else if (!strcmp(argv[i], "-camt"))
@@ -333,9 +344,9 @@ main (int argc, char *argv[])
                 // Camera translation:
                 if (i > argc - 4)
                     usageMessage(argv[0]);
-                camTx = strtol(argv[i + 1], 0, 0);
-                camTy = strtol(argv[i + 2], 0, 0);
-                camTz = strtol(argv[i + 3], 0, 0);
+                camTx = strtod(argv[i + 1], NULL);
+                camTy = strtod(argv[i + 2], NULL);
+                camTz = strtod(argv[i + 3], NULL);
                 centerCam = false;
                 i += 4;
             }
@@ -344,9 +355,9 @@ main (int argc, char *argv[])
                 // Camera rotation:
                 if (i > argc - 4)
                     usageMessage(argv[0]);
-                camRx = strtol(argv[i + 1], 0, 0);
-                camRy = strtol(argv[i + 2], 0, 0);
-                camRz = strtol(argv[i + 3], 0, 0);
+                camRx = strtod(argv[i + 1], NULL);
+                camRy = strtod(argv[i + 2], NULL);
+                camRz = strtod(argv[i + 3], NULL);
                 i += 4;
             }
             else if (!strcmp(argv[i], "-camfl"))
@@ -354,7 +365,7 @@ main (int argc, char *argv[])
                 // Camera focal-length:
                 if (i > argc - 2)
                     usageMessage(argv[0]);
-                camFocal = fabs(strtol(argv[i + 1], 0, 0));
+                camFocal = fabs(strtod(argv[i + 1], NULL));
                 i += 2;
             }
             else if (!strcmp(argv[i], "-camha"))
@@ -362,8 +373,19 @@ main (int argc, char *argv[])
                 // Camera horiz-aperture:
                 if (i > argc - 2)
                     usageMessage(argv[0]);
-                camHaper = fabs(strtol(argv[i + 1], 0, 0));
+                camHaper = fabs(strtod(argv[i + 1], NULL));
                 i += 2;
+            }
+            else if (!strcmp(argv[i], "-apwin"))
+            {
+                // Camera pixel aperture:
+                if (i > argc - 5)
+                    usageMessage(argv[0]);
+                apertureWindow.min.x = strtol(argv[i + 1], 0, 0);
+                apertureWindow.min.y = strtol(argv[i + 2], 0, 0);
+                apertureWindow.max.x = strtol(argv[i + 3], 0, 0);
+                apertureWindow.max.y = strtol(argv[i + 4], 0, 0);
+                i += 5;
             }
             else if (!strcmp(argv[i], "-v"))
             {
@@ -373,7 +395,7 @@ main (int argc, char *argv[])
                 verbose = true;
                 i += 1;
             }
-            else if (!strcmp(argv[i], "-h"))
+            else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help"))
             {
                 // Print help message:
                 usageMessage(argv[0], true);
@@ -434,12 +456,26 @@ main (int argc, char *argv[])
 
         //--------------------------------------------------------------------------
 
-        MyCamera cam(Imath::V3f(camTx, camTy, camTz)/*translate*/,
-                     Imath::V3f(camRx, camRy, camRz)/*rotate*/,
-                     camFocal/*focalLength*/,
-                     camHaper/*hAperture*/,
-                     inDeepTile.displayWindow(),
-                     1.0f/*pixel_aspect*/);
+        // Build the camera aperture by searching for 'apertureWindow' tag - if it
+        // doesn't exist default to displayWindow:
+        for (Imf::Header::ConstIterator it=inHeader.begin(); it != inHeader.end(); ++it)
+        {
+            if (strcmp(it.name(), "apertureWindow")!=0 || strcmp(it.attribute().typeName(), "box2i")!=0)
+                continue;
+            apertureWindow = static_cast<const Imf::Box2iAttribute*>(&it.attribute())->value();
+            break;
+        }
+        // If aperture window's not yet set default to displayWindow:
+        if (apertureWindow.max.x < apertureWindow.min.x || apertureWindow.max.y < apertureWindow.min.y)
+            apertureWindow = inDeepTile.displayWindow();
+
+
+        SimpleRayCamera cam(Imath::V3f(camTx, camTy, camTz)/*translate*/,
+                            Imath::V3f(camRx, camRy, camRz)/*rotate*/,
+                            camFocal/*focalLength*/,
+                            camHaper/*hAperture*/,
+                            apertureWindow,
+                            1.0f/*pixel_aspect*/);
 
         // Make a bunch of spheres to intersect:
         std::vector<MySphere> pixelSpheres;
@@ -450,9 +486,9 @@ main (int argc, char *argv[])
         uint64_t ID = 0;
         int maxSamples = 0;
         Dcx::DeepPixel inDeepPixel(shaderChannels);
-        for (int inY=inDeepTile.y(); inY <= inDeepTile.t(); inY += skipPixel)
+        for (int inY=inDeepTile.minY(); inY <= inDeepTile.maxY(); inY += skipPixel)
         {
-            for (int inX=inDeepTile.x(); inX <= inDeepTile.r(); inX += skipPixel)
+            for (int inX=inDeepTile.minX(); inX <= inDeepTile.maxX(); inX += skipPixel)
             {
                 inDeepTile.getDeepPixel(inX, inY, inDeepPixel);
                 const size_t nSamples = inDeepPixel.size();
@@ -492,11 +528,11 @@ main (int argc, char *argv[])
         // Map of unique prim intersections:
         DeepSurfaceIntersectionMap deepSurfaceIntersectionMap;
 
-        for (int outY=outDeepTile.y(); outY <= outDeepTile.t(); ++outY)
+        for (int outY=outDeepTile.minY(); outY <= outDeepTile.maxY(); ++outY)
         {
             if (verbose)
                 std::cout << "  line " << outY << std::endl;
-            for (int outX=outDeepTile.x(); outX <= outDeepTile.r(); ++outX)
+            for (int outX=outDeepTile.minX(); outX <= outDeepTile.maxX(); ++outX)
             {
                 outDeepPixel.clear();
                 deepAccumIntersectionList.clear();
@@ -522,7 +558,7 @@ main (int argc, char *argv[])
 
                         // Build a ray at this subpixel offset.
                         // (this offset would normally include stochastic jitter)
-                        MyRay R;
+                        SimpleRay R;
                         cam.buildRay(float(outX)+sdx,
                                      float(outY)+sdy, R);
 
@@ -667,7 +703,7 @@ main (int argc, char *argv[])
                     ds.Zb    = float(I.tmax);
                     ds.index = -1; // gets assigned when appended to DeepPixel below
                     ds.metadata.spmask = I.spmask;
-                    ds.metadata.flags  = Dcx::DEEP_LINEAR_INTERP_SAMPLE; // always hard surfaces for this example
+                    ds.metadata.flags  = Dcx::DeepFlags::LINEAR_INTERP; // always hard surfaces for this example
 
                     // Append to DeepPixel and retrieve assigned index:
                     const size_t dsIndex = outDeepPixel.append(ds);

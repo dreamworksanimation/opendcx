@@ -1,6 +1,17 @@
 OpenDCX Version History
 =======================
 
+Version 2.2.2 - March 1 2017
+    - Partial subpixel-coverage flags extended to store a coverage weight
+    - DeepFlags class broken out to better support partial spcoverage bits
+    - DeepPixel flattening algorithm refined to support additive partial spcoverages
+    - DeepTransform now supports partial spcoverage weights
+    - DeepTransform now supports forward and backwards projection methods
+    - 'spmask' channel name definitions changed to work around Nuke 10 limitations
+    - PixelTile base class created to support generic rectangular pixel regions
+    - ImageFormat created to support formal Format definitions stored in OpenEXR metadata
+    - Nuke plugins updated - lots of bug fixes / mistakes / cleanups taken care of
+
 Version 2.2.0 - July 21 2016 (initial public release)
     - Channel support system similar to Nuke's providing channel loop macros and boolean channel set operations (ChannelSet)
     - Primary flattening algorithm with linear/log interpolation, matte cutout and subpixel mask support (DeepPixel)

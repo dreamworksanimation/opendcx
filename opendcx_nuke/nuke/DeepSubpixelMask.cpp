@@ -41,7 +41,18 @@
 
 #include <OpenDCX/DcxDeepPixel.h>
 
+#include "DDImageAdapter.h" // for spmask nuke channel assignments
+
+
 using namespace DD::Image;
+
+//
+//  DeepSubpixelMask
+//
+//      An example Nuke plugin which displays a deep sample's subpixel mask pattern
+//      and allows it to be set.
+//      This plugin is intended primarily for debugging purposes.
+//
 
 //----------------------------------------------------------------------------------------
 
@@ -53,21 +64,23 @@ const char* const pattern_modes[] = { "get", "set", 0 };
 /*!
 */
 class DeepSubpixelMask : public DeepFilterOp {
-    float           k_pos[2];                       //!< Pixel to sample
-    int             k_sample;                       //!< Which sample to sample
-    Channel         k_spmask_channel[2];            //!< Subpixel mask channels
-    Channel         k_flags_channel;                //!< Per-sample flags channel
-    int             k_mode;
-    bool            k_set_all_samples;              //!< In set mode apply pattern to all samples
+    float                   k_pos[2];               //!< Pixel to sample
+    int                     k_sample;               //!< Which sample to sample
+    DD::Image::Channel      k_color_channel[4];     //!< Color layer to sample
+    DD::Image::Channel      k_spmask_channel[2];    //!< Per-sample subpixel mask channels
+    DD::Image::Channel      k_flags_channel;        //!< Per-sample flags channel
+    int                     k_mode;
+    bool                    k_set_all_samples;      //!< In set mode apply pattern to all samples
     //
-    int             k_num_samples;                  //!< Num samples for selected pixel
-    ConvolveArray   k_spmask_pattern;               //!< For pattern knob
-    float           k_spmask_array[Dcx::SpMask8::numBits]; //!< Pattern data
-    double          k_Zf_sampled;                   //!< Sampled Zf
-    double          k_Zb_sampled;                   //!< Sampled Zb
-    const char*     k_flags_sampled;                //!< Sampled flags string
+    int                     k_num_samples;          //!< Num samples for selected pixel
+    ConvolveArray           k_spmask_pattern;       //!< For pattern knob
+    float                   k_spmask_array[Dcx::SpMask8::numBits]; //!< Pattern data
+    double                  k_Zf_sampled;           //!< Sampled Zf
+    double                  k_Zb_sampled;           //!< Sampled Zb
+    const char*             k_flags_sampled;        //!< Sampled flags string
+    double                  k_color_sampled[4];     //!< Sampled color values
     //
-    Dcx::DeepMetadata m_dpmeta;         //!< Derived deep metadata (subpixel mask, flags)
+    Dcx::DeepMetadata       m_dpmeta;               //!< Derived deep metadata (subpixel mask, flags)
 
 public:
     static const Description description;
@@ -78,11 +91,15 @@ public:
     }
 
     DeepSubpixelMask(Node* node) : DeepFilterOp(node), k_spmask_pattern() {
+        // Get OpenDCX standard channels assigned in the correct order:
+        Dcx::dcxGetSpmaskChannels(k_spmask_channel[0], k_spmask_channel[1], k_flags_channel);
+        //
         k_pos[0]            = k_pos[1] = 0.0f;
         k_sample            = 0;
-        k_spmask_channel[0] = DD::Image::getChannel(Dcx::spMask8ChannelName1);
-        k_spmask_channel[1] = DD::Image::getChannel(Dcx::spMask8ChannelName2);
-        k_flags_channel     = DD::Image::getChannel(Dcx::flagsChannelName);
+        k_color_channel[0]  = Chan_Red;
+        k_color_channel[1]  = Chan_Green;
+        k_color_channel[2]  = Chan_Blue;
+        k_color_channel[3]  = Chan_Alpha;
         k_mode              = PATTERN_GET;
         k_set_all_samples   = false;
         k_num_samples       = 0;
@@ -92,6 +109,7 @@ public:
         k_spmask_pattern.array  = k_spmask_array;
         k_Zf_sampled = k_Zb_sampled = 0.0;
         k_flags_sampled = "";
+        k_color_sampled[0] = k_color_sampled[1] = k_color_sampled[2] = k_color_sampled[3] = 0.0;
     }
 
     /*virtual*/ Op* op() { return this; }
@@ -107,9 +125,14 @@ public:
     /*virtual*/
     void knobs(Knob_Callback f) {
         XY_knob(f, k_pos, "pos");
+        Input_Channel_knob(f, k_color_channel, 4/*nChans*/, 0/*input*/, "channels", "color channels");
+            SetFlags(f, Knob::EARLY_STORE);
+            Tooltip(f, "The color channels to display");
         Input_Channel_knob(f, k_spmask_channel, 2/*nChans*/, 0/*input*/, "spmask_channels", "spmask channels");
+            SetFlags(f, Knob::EARLY_STORE);
             Tooltip(f, "Channels which contain the per-sample spmask data. Two channels are required for an 8x8 mask.");
         Input_Channel_knob(f, &k_flags_channel, 1/*nChans*/, 0/*input*/, "flags_channel", "flags");
+            SetFlags(f, Knob::EARLY_STORE);
             ClearFlags(f, Knob::STARTLINE);
             SetFlags(f, Knob::NO_CHECKMARKS);
             Tooltip(f, "Channel which contains the per-sample flag data.");
@@ -138,6 +161,25 @@ public:
             ClearFlags(f, Knob::STARTLINE);
         Newline(f);
         //
+#if 0
+        AColor_knob(f, k_color_sampled, "colors", "color");
+            SetFlags(f, Knob::EARLY_STORE | Knob::NO_ANIMATION);
+            ClearFlags(f, Knob::SLIDER);
+#else
+        Double_knob(f, &k_color_sampled[0], "color0", "color");
+            SetFlags(f, Knob::EARLY_STORE | Knob::NO_ANIMATION);
+            ClearFlags(f, Knob::SLIDER);
+        Double_knob(f, &k_color_sampled[1], "color1", "");
+            SetFlags(f, Knob::EARLY_STORE | Knob::NO_ANIMATION);
+            ClearFlags(f, Knob::STARTLINE | Knob::SLIDER);
+        Double_knob(f, &k_color_sampled[2], "color2", "");
+            SetFlags(f, Knob::EARLY_STORE | Knob::NO_ANIMATION);
+            ClearFlags(f, Knob::STARTLINE | Knob::SLIDER);
+        Double_knob(f, &k_color_sampled[3], "color3", "");
+            SetFlags(f, Knob::EARLY_STORE | Knob::NO_ANIMATION);
+            ClearFlags(f, Knob::STARTLINE | Knob::SLIDER);
+#endif
+        //
         Array_knob(f, &k_spmask_pattern, Dcx::SpMask8::width, Dcx::SpMask8::height, "spmask", "pattern");
             SetFlags(f, Knob::EARLY_STORE | Knob::NO_ANIMATION);
             Tooltip(f, "In set mode any non-zero value sets the bit.\n"
@@ -158,6 +200,14 @@ public:
         knob("Zf")->enable(sampled_pixel);
         knob("Zb")->enable(sampled_pixel);
         knob("flags")->enable(sampled_flags);
+#if 0
+        knob("colors")->enable(sampled_pixel);
+#else
+        knob("color0")->enable(sampled_pixel);
+        knob("color1")->enable(sampled_pixel);
+        knob("color2")->enable(sampled_pixel);
+        knob("color3")->enable(sampled_pixel);
+#endif
         knob("spmask")->enable(sampled_spmask || k_mode == PATTERN_SET);
 
         return 1; // make sure we get called again
@@ -189,7 +239,7 @@ public:
         }
 
         // Output subpixel mask channels:
-        ChannelSet out_channels(_deepInfo.channels());
+        DD::Image::ChannelSet out_channels(_deepInfo.channels());
         if (k_mode == PATTERN_SET) {
             out_channels += k_spmask_channel[0];
             out_channels += k_spmask_channel[1];
@@ -201,13 +251,17 @@ public:
     /*! Expand the deep request to include the sample location and spmask/flag channels.
     */
     /*virtual*/
-    void getDeepRequests(Box bbox, const ChannelSet& channels, int count, std::vector<RequestData>& requests) {
+    void getDeepRequests(Box bbox, const DD::Image::ChannelSet& channels, int count, std::vector<RequestData>& requests) {
         bbox.merge(int(k_pos[0]), int(k_pos[1]));
-        ChannelSet input_channels(channels);
+        DD::Image::ChannelSet input_channels(channels);
         input_channels += Mask_Deep; // just in case...
         input_channels += k_spmask_channel[0];
         input_channels += k_spmask_channel[1];
         input_channels += k_flags_channel;
+        input_channels += k_color_channel[0];
+        input_channels += k_color_channel[1];
+        input_channels += k_color_channel[2];
+        input_channels += k_color_channel[3];
         DeepFilterOp::getDeepRequests(bbox, input_channels, count, requests);
     }
 
@@ -226,17 +280,22 @@ public:
         DeepInfo deepInfo = input0()->deepInfo();
         Box box(sampleX, sampleY, sampleX+1, sampleY+1);
 
-        ChannelSet get_channels(Mask_None);
+        DD::Image::ChannelSet get_channels(Mask_None);
         if (deepInfo.channels().contains(Mask_Deep)          ) get_channels += Mask_Deep;
         if (deepInfo.channels().contains(k_spmask_channel[0])) get_channels += k_spmask_channel[0];
         if (deepInfo.channels().contains(k_spmask_channel[1])) get_channels += k_spmask_channel[1];
         if (deepInfo.channels().contains(k_flags_channel    )) get_channels += k_flags_channel;
+        if (deepInfo.channels().contains(k_color_channel[0] )) get_channels += k_color_channel[0];
+        if (deepInfo.channels().contains(k_color_channel[1] )) get_channels += k_color_channel[1];
+        if (deepInfo.channels().contains(k_color_channel[2] )) get_channels += k_color_channel[2];
+        if (deepInfo.channels().contains(k_color_channel[3] )) get_channels += k_color_channel[3];
 
         input0()->deepRequest(box, get_channels);
 
         k_num_samples = 0;
         k_Zf_sampled = k_Zb_sampled = 0.0;
         k_flags_sampled = "";
+        k_color_sampled[0] = k_color_sampled[1] = k_color_sampled[2] = k_color_sampled[3] = 0.0;
         std::string flags_str;
         memset(k_spmask_array, 0, Dcx::SpMask8::numBits*sizeof(float));
 
@@ -249,18 +308,27 @@ public:
                 DD::Image::DeepPixel in_pixel = in_plane.getPixel(sampleY, sampleX);
                 k_num_samples = in_pixel.getSampleCount();
                 if (k_sample >= 0 && k_sample < k_num_samples) {
-                    k_Zf_sampled = in_pixel.getOrderedSample(k_sample, Chan_DeepFront);
-                    k_Zb_sampled = in_pixel.getOrderedSample(k_sample, Chan_DeepBack);
-                    // Clip precision to 3 digits:
-                    k_Zf_sampled = rint(k_Zf_sampled * 1000.0)/1000.0;
-                    k_Zb_sampled = rint(k_Zb_sampled * 1000.0)/1000.0;
+                    const unsigned get_sample = k_num_samples - k_sample - 1;
+                    k_Zf_sampled = in_pixel.getOrderedSample(get_sample, Chan_DeepFront);
+                    k_Zb_sampled = in_pixel.getOrderedSample(get_sample, Chan_DeepBack);
+                    k_color_sampled[0] = in_pixel.getOrderedSample(get_sample, k_color_channel[0]);
+                    k_color_sampled[1] = in_pixel.getOrderedSample(get_sample, k_color_channel[1]);
+                    k_color_sampled[2] = in_pixel.getOrderedSample(get_sample, k_color_channel[2]);
+                    k_color_sampled[3] = in_pixel.getOrderedSample(get_sample, k_color_channel[3]);
+                    // Clip precision to 4 digits:
+                    k_Zf_sampled = rint(k_Zf_sampled * 10000.0)/10000.0;
+                    k_Zb_sampled = rint(k_Zb_sampled * 10000.0)/10000.0;
+                    k_color_sampled[0] = rint(k_color_sampled[0] * 10000.0)/10000.0;
+                    k_color_sampled[1] = rint(k_color_sampled[1] * 10000.0)/10000.0;
+                    k_color_sampled[2] = rint(k_color_sampled[2] * 10000.0)/10000.0;
+                    k_color_sampled[3] = rint(k_color_sampled[3] * 10000.0)/10000.0;
 
                     if (k_mode == PATTERN_GET &&
                         (deepInfo.channels().contains(k_spmask_channel[0]) ||
                          deepInfo.channels().contains(k_spmask_channel[1]))) {
                         // Convert floats to SpMask:
-                        const float sp1 = in_pixel.getOrderedSample(k_sample, k_spmask_channel[0]);
-                        const float sp2 = in_pixel.getOrderedSample(k_sample, k_spmask_channel[1]);
+                        const float sp1 = in_pixel.getOrderedSample(get_sample, k_spmask_channel[0]);
+                        const float sp2 = in_pixel.getOrderedSample(get_sample, k_spmask_channel[1]);
                         m_dpmeta.spmask.fromFloat(sp1, sp2);
                         // Convert to float array and update Array knob:
                         for (int sp_y=0; sp_y < Dcx::SpMask8::height; ++sp_y) {
@@ -271,7 +339,7 @@ public:
                         sampled_spmask = true;
                     }
                     if (deepInfo.channels().contains(k_flags_channel)) {
-                        m_dpmeta.flags = (unsigned)floorf(in_pixel.getOrderedSample(k_sample, k_flags_channel));
+                        m_dpmeta.flags = (unsigned)floorf(in_pixel.getOrderedSample(get_sample, k_flags_channel));
                         std::ostringstream oss;
                         m_dpmeta.printFlags(oss);
                         flags_str = oss.str();
@@ -282,32 +350,38 @@ public:
             }
         }
         //
-        Knob* ksamples = knob("num_samples");
-        assert(ksamples);
-        ksamples->set_value(k_num_samples);
-        ksamples->changed();
+        Knob* ksamples = knob("num_samples"); assert(ksamples);
+        ksamples->set_value(k_num_samples); ksamples->changed();
         //
         Knob* kZf = knob("Zf");
         Knob* kZb = knob("Zb");
         assert(kZf && kZb);
-        kZf->set_value(k_Zf_sampled);
-        kZf->changed();
-        kZb->set_value(k_Zb_sampled);
-        kZb->changed();
+        kZf->set_value(k_Zf_sampled); kZf->changed();
+        kZb->set_value(k_Zb_sampled); kZb->changed();
         //
-        Knob* kflags = knob("flags");
-        assert(kflags);
-        kflags->set_text(flags_str.c_str());
-        kflags->changed();
+        Knob* kflags = knob("flags"); assert(kflags);
+        kflags->set_text(flags_str.c_str()); kflags->changed();
         //
-        Knob* karray = knob("spmask");
-        assert(karray);
-        karray->set_values(k_spmask_array, Dcx::SpMask8::numBits);
-        karray->changed();
+#if 0
+        Knob* kcolors = knob("colors"); assert(kcolors);
+        kcolors->set_values(k_colors_sampled, 4); kcolors->changed();
+#else
+        Knob* kcolor = knob("color0"); assert(kcolor);
+        kcolor->set_value(k_color_sampled[0]); kcolor->changed();
+        kcolor = knob("color1"); assert(kcolor);
+        kcolor->set_value(k_color_sampled[1]); kcolor->changed();
+        kcolor = knob("color2"); assert(kcolor);
+        kcolor->set_value(k_color_sampled[2]); kcolor->changed();
+        kcolor = knob("color3"); assert(kcolor);
+        kcolor->set_value(k_color_sampled[3]); kcolor->changed();
+#endif
+        //
+        Knob* karray = knob("spmask"); assert(karray);
+        karray->set_values(k_spmask_array, Dcx::SpMask8::numBits); karray->changed();
     }
 
     /*virtual*/
-    bool doDeepEngine(Box bbox, const ChannelSet& output_channels, DeepOutputPlane& deep_out_plane) {
+    bool doDeepEngine(Box bbox, const DD::Image::ChannelSet& output_channels, DeepOutputPlane& deep_out_plane) {
         if (!input0())
             return true;
 
@@ -354,6 +428,16 @@ public:
                             out_pixel.push_back(sp1);
                         else if (z == k_spmask_channel[1])
                             out_pixel.push_back(sp2);
+#if 0
+                        else if (z == k_color_channel[0])
+                            out_pixel.push_back();
+                        else if (z == k_color_channel[1])
+                            out_pixel.push_back();
+                        else if (z == k_color_channel[2])
+                            out_pixel.push_back();
+                        else if (z == k_color_channel[3])
+                            out_pixel.push_back();
+#endif
                         else
                             out_pixel.push_back(in_pixel.getUnorderedSample(i, z));
                     }

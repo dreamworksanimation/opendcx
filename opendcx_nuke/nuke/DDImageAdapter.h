@@ -44,6 +44,9 @@
 //  class  DDImageDeepInputPlane
 //  class  DDImageDeepOutputPlane
 //
+//  Utility functions & classes to translate between Nuke's DDImage deep
+//  structures and OpenDCX's.
+//
 //-----------------------------------------------------------------------------
 
 #include <OpenDCX/DcxDeepPixel.h>
@@ -61,24 +64,33 @@ OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 //--------------------------------------------------------------------------------
 
 //
-// Convert a DD::Image::ChannelSet to a Dcx::ChannelSet.
+// Assign/get the DD::Image::Channels that are appropriate for OpenDCX.
 //
-// This stores previously converted ChannelSets and returns quickly if the same
-// set is requested again.
+// This calls DD::Image::getChannel() with 'sort=false' so that Nuke does
+// not reorder the channels in the 'spmask' layer - we always want the order
+// to be sp1/sp2/flags so that ChannelKnobs display correctly by default.
 //
-
-DCX_EXPORT
-Dcx::ChannelSet
-dcxChannelSet (const DD::Image::ChannelSet& in);
-
-
-//
-// Convert a DD::Image::ChannelSet to a Dcx::ChannelAliasPtrSet.
+// To help ensure this there's a static dummy object that calls this method
+// so that the layer and channels are assigned in Nuke before any Op
+// constructors are called.
 //
 
 DCX_EXPORT
-Dcx::ChannelAliasPtrSet
-dcxChannelAliasPtrSet (const DD::Image::ChannelSet& in);
+void
+dcxGetSpmaskChannels (DD::Image::Channel& sp1,
+                      DD::Image::Channel& sp2,
+                      DD::Image::Channel& flags);
+
+
+//
+// Add new DD::Image::Channel by getting its full name and looking it
+// up in the Dcx::ChannelContext.
+// This may create a new Dcx::ChannelIdx.
+//
+
+DCX_EXPORT
+Dcx::ChannelIdx
+dcxAddChannel (DD::Image::Channel z);
 
 
 //
@@ -91,6 +103,19 @@ dcxChannelAliasPtrSet (const DD::Image::ChannelSet& in);
 DCX_EXPORT
 Dcx::ChannelIdx
 dcxChannel (DD::Image::Channel z);
+
+
+//
+// Convert a DD::Image::ChannelSet to a Dcx::ChannelSet.
+//
+// This stores previously converted ChannelSets and returns quickly if the same
+// set is requested again.
+//
+
+DCX_EXPORT
+Dcx::ChannelSet
+dcxChannelSet (const DD::Image::ChannelSet& in);
+
 
 //--------------------------------------------------------------------------------
 
@@ -107,40 +132,41 @@ dcxMatrix4ToM44f(const DD::Image::Matrix4& m);
 DCX_EXPORT
 void
 dcxCopyDDImageDeepPixel (const DD::Image::DeepPixel& in,
-                         Dcx::SpMaskMode spmask_mode,
-                         const std::vector<DD::Image::Channel>& spmask_chan_list,
+                         const DD::Image::Channel spmask_channel0,
+                         const DD::Image::Channel spmask_channel1,
                          const DD::Image::Channel flags_channel,
                          Dcx::DeepPixel& out);
 
 
 //
 // Copy the contents of a DD::Image::DeepPixel sample to a Dcx::DeepSegment
-// and Dcx::Pixelf, returning true on success.
+// and optionally a Dcx::Pixelf, returning true on success.
+//
 // Note that the DeepSegment's channel-array index is left unassigned (-1)
-// since the copy is done outside the scope of a DeepPixel.
+// since the copy is done outside the scope of a Dcx::DeepPixel.
 //
 
 DCX_EXPORT
 bool
 dcxCopyDDImageDeepSample (const DD::Image::DeepPixel& in,
                           unsigned sample,
-                          Dcx::SpMaskMode spmask_mode,
-                          const std::vector<DD::Image::Channel>& spmask_chan_list,
+                          const DD::Image::Channel spmask_channel0,
+                          const DD::Image::Channel spmask_channel1,
                           const DD::Image::Channel flags_channel,
                           Dcx::DeepSegment& segment_out,
                           Dcx::Pixelf* pixel_out);
 
 
 //
-// Extract subpixel mask and flags metadata from input 'spmask' layer.
+// Extract subpixel mask and flags metadata from a DD::Image::DeepPixel sample.
 //
 
 DCX_EXPORT
 void
 dcxGetDeepSampleMetadata (const DD::Image::DeepPixel& in,
                           unsigned sample,
-                          Dcx::SpMaskMode spmask_mode,
-                          const std::vector<DD::Image::Channel>& spmask_chan_list,
+                          const DD::Image::Channel spmask_channel0,
+                          const DD::Image::Channel spmask_channel1,
                           const DD::Image::Channel flags_channel,
                           Dcx::DeepMetadata& metadata_out);
 
@@ -157,15 +183,18 @@ class DDImageDeepPlane : public Dcx::DeepTile
   public:
 
     //
-    // Copy resolution and channel info from another DeepTile.
+    // Construct a Dcx::DeepTile from DDImage structures.
+    // The DeepTile's displayWindow is copied from format while its dataWindow
+    // comes from bbox.
+    //
     // No pixel data is copied.
     //
 
     DDImageDeepPlane (const DD::Image::Box& format,
                       const DD::Image::Box& bbox,
                       const DD::Image::ChannelSet& channels,
-                      Dcx::SpMaskMode spmask_mode,
-                      const std::vector<DD::Image::Channel>& spmask_chan_list,
+                      const DD::Image::Channel spmask_channel0,
+                      const DD::Image::Channel spmask_channel1,
                       const DD::Image::Channel flags_channel,
                       WriteAccessMode write_access_mode=WRITE_DISABLED);
 
@@ -194,9 +223,8 @@ class DDImageDeepPlane : public Dcx::DeepTile
 
   protected:
     // To pass to dcxCopyDDImageDeepPixel():
-    Dcx::SpMaskMode                     m_spmask_mode;
-    std::vector<DD::Image::Channel>     m_spmask8_chan_list;
-    DD::Image::Channel                  m_flags_channel;
+    DD::Image::Channel  m_spmask_channel[2];
+    DD::Image::Channel  m_flags_channel;
 
 };
 
@@ -209,14 +237,17 @@ class DDImageDeepInputPlane : public DDImageDeepPlane
   public:
 
     //
-    // Copy resolution and channel info from another DeepTile.
+    // Copy resolution and channel info from input DD::Image::Format and
+    // DD::Image::DeepPlane.  The Format is required to define the Dcx::DeepTile's
+    // displayWindow while the dataWindow comes from the DeepPlane.
+    //
     // No pixel data is copied.
     //
 
     DDImageDeepInputPlane (const DD::Image::Box& format,
                            const DD::Image::DeepPlane* deep_in_plane,
-                           Dcx::SpMaskMode spmask_mode,
-                           const std::vector<DD::Image::Channel>& spmask_chan_list,
+                           const DD::Image::Channel spmask_channel0,
+                           const DD::Image::Channel spmask_channel1,
                            const DD::Image::Channel flags_channel);
 
 
@@ -256,14 +287,17 @@ class DDImageDeepOutputPlane : public DDImageDeepPlane
   public:
 
     //
-    // Copy resolution and channel info from another DeepTile.
+    // Copy resolution and channel info from input DD::Image::Format and
+    // DD::Image::DeepPlane.  The Format is required to define the Dcx::DeepTile's
+    // displayWindow while the dataWindow comes from the DeepPlane.
+    //
     // No pixel data is copied.
     //
 
     DDImageDeepOutputPlane (const DD::Image::Box& format,
                             DD::Image::DeepOutputPlane* deep_out_plane,
-                            Dcx::SpMaskMode spmask_mode,
-                            const std::vector<DD::Image::Channel>& spmask_chan_list,
+                            const DD::Image::Channel spmask_channel0,
+                            const DD::Image::Channel spmask_channel1,
                             const DD::Image::Channel flags_channel);
 
 
@@ -291,24 +325,23 @@ class DDImageDeepOutputPlane : public DDImageDeepPlane
 
     //
     // Writes a DeepPixel to the DeepOutputPlane.
-    // Write access is sequential so both x/y args are ignored.
+    // Write access is sequential for a DD::Image::DeepOutputPlane so
+    // x/y args are not required
     //
 
-    /*virtual*/ bool setDeepPixel (int,/*x ignored*/
-                                   int,/*y ignored*/
-                                   const Dcx::DeepPixel& pixel);
+    void setDeepPixelSequential (const Dcx::DeepPixel& pixel);
 
     //
     // Writes an empty DeepPixel (0 samples) to the DeepOutputPlane.
-    // Write access is sequential so both x/y args are ignored.
+    // Write access is sequential for a DD::Image::DeepOutputPlane so
+    // x/y args are not required
     //
 
-    /*virtual*/ bool clearDeepPixel (int,/*x ignored*/
-                                     int /*y ignored*/);
+    void clearDeepPixelSequential ();
 
 
   protected:
-    DD::Image::DeepOutputPlane*     m_out_plane;
+    DD::Image::DeepOutputPlane* m_out_plane;
 
 };
 

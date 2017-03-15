@@ -38,16 +38,18 @@
 #ifndef INCLUDED_DCX_CHANNELSET_H
 #define INCLUDED_DCX_CHANNELSET_H
 
-//-----------------------------------------------------------------------------
+//=============================================================================
 //
 //  typedef  ChannelIdx
 //  typedef  ChannelIdxSet
 //
 //  class    ChannelSet
 //
-//-----------------------------------------------------------------------------
+//=============================================================================
 
 #include "DcxAPI.h"
+
+#include <OpenEXR/ImfPixelType.h>
 
 #include <stdint.h> // for uint32_t
 #include <vector>
@@ -55,31 +57,45 @@
 #include <iostream>
 
 
+//-------------------------
+//!rst:cpp:begin::
+//ChannelSet
+//==========
+//-------------------------
+
+
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
-//---------------------------------------------------------------------------
-
+//---------------------
+//!rst:left-align::
+//.. _channelidx_type:
 //
-// Global channel-index type
-//
+//ChannelIdx
+//**********
+//---------------------
+//----------------------------------------
+// ``uint_32_t``
+// Global channel index type
+//----------------------------------------
 typedef uint32_t ChannelIdx;
 
-//
+
+//------------------------------------------
 // Reserved value for a non-existant channel
-//
+//------------------------------------------
 static const ChannelIdx  Chan_Invalid = 0;
 
-//
+//-----------------------------------------------------------------
 // Reserved value for the maximum channel index allowed.
-// (TODO: remove this in favor of packed arrays...?)
-//
+// (TODO: remove this in favor of varying-sized packed arrays...?)
+//-----------------------------------------------------------------
 static const ChannelIdx  Chan_Max = 1023;
 
-//
+//-------------------------------------------------------------------
 // Reserved value. If this is the only ChannelIdx in a ChannelSet it
 // indicates a set with all channels enabled (i.e. Mask_All)
 // (TODO: ignored by most ChannelSet operations atm!)
-//
+//-------------------------------------------------------------------
 static const ChannelIdx  Chan_All = 0xffffffff;
 
 
@@ -88,14 +104,27 @@ typedef std::set<ChannelIdx> ChannelIdxSet;
 
 class ChannelContext;
 
-//---------------------------------------------------------------------------
+//---------------------
+//!rst:left-align::
+//.. _channelset_class:
+//
+//ChannelSet
+//**********
+//---------------------
+
+
+//======================
 //
 //  class ChannelSet
-//      A std::set wrapper class that acts similar to DD::Image::ChannelSet.
+// 
+//======================
+//---------------------------------------------------------------------------
 //
-//      The set contains ChannelIdx indices.  Use the foreach_channel()
-//      macro to iterate through the set (similar to Nuke's
-//      DD::Image foreach() macro.)
+//  A std::set wrapper class that acts similar to DD::Image::ChannelSet.
+//
+//  The set contains ChannelIdx indices.  Use the foreach_channel()
+//  macro to iterate through the set (similar to Nuke's
+//  DD::Image foreach() macro.)
 //
 //---------------------------------------------------------------------------
 
@@ -114,8 +143,8 @@ class DCX_EXPORT ChannelSet
         iterator ();
         iterator (const ChannelIdxSet::iterator&);
 
-        ChannelIdx  channel () const;
-        ChannelIdx  operator *  ();
+        operator ChannelIdx () const;
+        ChannelIdx  operator * ();
 
         bool operator != (const iterator&) const;
         bool operator != (ChannelIdx) const;
@@ -190,9 +219,11 @@ class DCX_EXPORT ChannelSet
     bool    empty () const;
 
 
-    //-----------------------------------------
-    // Mask applies to all assigned ChannelIdxs
-    //-----------------------------------------
+    //-------------------------------------------------------
+    // Mask applies to all assigned ChannelIdxs.
+    // This tests for a special case where the mask contains
+    // a single Chan_All ChannelIdx.
+    //------------------------------------------------------
 
     bool    all () const;
 
@@ -222,6 +253,14 @@ class DCX_EXPORT ChannelSet
     bool    contains (ChannelIdx) const;
 
 
+    //-------------------
+    // Equality operators
+    //-------------------
+
+    bool operator == (const ChannelSet&) const;
+    bool operator != (const ChannelSet&) const;
+
+
     //--------------------------------------------------------------------
     // Add a ChannelIdx or ChannelSet to the mask.
     // There will only be one instance of each ChannelIdx value in the set
@@ -230,17 +269,9 @@ class DCX_EXPORT ChannelSet
     void    insert (const ChannelSet&);
     void    insert (const ChannelIdxSet&);
     void    insert (ChannelIdx);
-
     void    operator += (const ChannelSet&);
     void    operator += (const ChannelIdxSet&);
     void    operator += (ChannelIdx);
-
-
-    //-----------------------------
-    // Bitwise operators on the set
-    //-----------------------------
-    ChannelSet operator | (const ChannelSet&);
-    ChannelSet operator & (const ChannelSet&);
 
 
     //------------------------------------------------
@@ -252,6 +283,13 @@ class DCX_EXPORT ChannelSet
     void    operator -= (const ChannelSet&);
     void    operator -= (const ChannelIdxSet&);
     void    operator -= (ChannelIdx);
+
+
+    //-----------------------------
+    // Bitwise operators on the set
+    //-----------------------------
+    ChannelSet operator | (const ChannelSet&);
+    ChannelSet operator & (const ChannelSet&);
 
 
     //---------------------------------------------------
@@ -296,22 +334,20 @@ class DCX_EXPORT ChannelSet
 //      This is similar to Nuke's DD::Image::ChannelSet foreach() macro.
 //      (must have a different name to avoid clashes when building Nuke plugins)
 // 
-//      Note that since an iterator is being incremented you must dereference it to get
-//      the ChannelIdx value.
 //      ex.
 //          ChannelSet my_channels(Mask_RGBA);
 //          Pixel<float> my_pixel(my_channels);
 //          my_pixel.erase();
 //          foreach_channel(z, my_channels)
 //          {
-//              my_pixel[*z] += 1.0f;
+//              my_pixel[z] += 1.0f;
 //          }
 //
 
 #undef  foreach_channel
 #define foreach_channel(CHAN, CHANNELS) \
     for (OPENDCX_INTERNAL_NAMESPACE::ChannelSet::iterator CHAN=CHANNELS.first(); \
-            *CHAN != OPENDCX_INTERNAL_NAMESPACE::Chan_Invalid; CHAN = CHANNELS.next(CHAN))
+            CHAN != OPENDCX_INTERNAL_NAMESPACE::Chan_Invalid; CHAN = CHANNELS.next(CHAN))
 
 
 //
@@ -326,6 +362,10 @@ ChannelSet operator & (const ChannelSet&,
 
 
 
+//--------------
+//!rst:cpp:end::
+//--------------
+
 //-----------------
 // Inline Functions
 //-----------------
@@ -333,8 +373,8 @@ ChannelSet operator & (const ChannelSet&,
 inline ChannelSet::ChannelSet () {}
 inline ChannelSet::iterator::iterator () : m_it() {}
 inline ChannelSet::iterator::iterator (const ChannelIdxSet::iterator& it) : m_it(it) {}
-inline ChannelIdx ChannelSet::iterator::channel () const { return *m_it; }
-inline ChannelIdx ChannelSet::iterator::operator * () { return this->channel(); }
+inline ChannelIdx ChannelSet::iterator::operator * () { return *m_it; }
+inline ChannelSet::iterator::operator ChannelIdx () const { return *m_it; }
 inline bool ChannelSet::iterator::operator != (const iterator& b) const { return (m_it != b.m_it); }
 inline bool ChannelSet::iterator::operator != (ChannelIdx channel) const { return (*m_it != channel); }
 inline bool ChannelSet::iterator::operator == (const iterator& b) const { return (m_it == b.m_it); }
@@ -354,7 +394,7 @@ inline ChannelSet& ChannelSet::operator = (ChannelIdx channel) { m_mask.clear();
 inline void   ChannelSet::clear () { m_mask.clear(); }
 inline size_t ChannelSet::size () const { return m_mask.size(); }
 inline bool   ChannelSet::empty () const { return (m_mask.size() == 0); }
-inline bool   ChannelSet::all () const { return (m_mask.size() == 1 && *m_mask.begin() == Chan_All); }
+inline bool   ChannelSet::all () const { return (m_mask.size() != 0 && *m_mask.begin() == Chan_All); }
 inline ChannelIdxSet& ChannelSet::mask () { return m_mask; }
 //
 inline ChannelSet::iterator ChannelSet::first () const
@@ -373,9 +413,7 @@ inline ChannelSet::iterator ChannelSet::prev (iterator it) const
 }
 inline ChannelSet::iterator ChannelSet::next (iterator it) const
 {
-    if (it.m_it == m_npos.end() || it.m_it == m_mask.end())
-        return ChannelSet::iterator(m_npos.end());
-    if (++it.m_it == m_mask.end())
+    if (it.m_it == m_npos.end() || it.m_it == m_mask.end() || ++it.m_it == m_mask.end())
         return ChannelSet::iterator(m_npos.end());
     return ChannelSet::iterator(it.m_it);
 }
@@ -386,11 +424,14 @@ inline ChannelSet::iterator ChannelSet::last () const
     return this->prev(ChannelSet::iterator(m_mask.end()));
 }
 //
-inline bool   ChannelSet::contains (ChannelIdx channel) const { return (m_mask.find(channel) != m_mask.end()); }
+inline bool   ChannelSet::contains (ChannelIdx channel) const { return (all())?true:(m_mask.find(channel) != m_mask.end()); }
 inline bool   ChannelSet::contains (const ChannelIdxSet& b) const {
-    for (ChannelIdxSet::const_iterator z=b.begin(); z != b.end(); ++z)
-        if (m_mask.find(*z) == m_mask.end())
-            return false;
+    if (!all())
+    {
+        for (ChannelIdxSet::const_iterator z=b.begin(); z != b.end(); ++z)
+            if (m_mask.find(*z) == m_mask.end())
+                return false;
+    }
     return true;
 }
 inline bool   ChannelSet::contains (const ChannelSet& b) const { return this->contains(b.m_mask); }
@@ -415,6 +456,24 @@ inline void   ChannelSet::erase (ChannelIdx channel) { m_mask.erase(channel); }
 inline void   ChannelSet::operator -= (ChannelIdx channel) { m_mask.erase(channel); }
 inline void   ChannelSet::operator -= (const ChannelIdxSet& b) { this->erase(b); }
 inline void   ChannelSet::operator -= (const ChannelSet& b) { this->erase(b.m_mask); }
+//
+inline bool   ChannelSet::operator == (const ChannelSet& b) const
+{
+    ChannelSet not_matched = *this;
+    foreach_channel(z, b)
+    {
+        if (!this->contains(z))
+            return false;
+        not_matched -= z;
+    }
+    foreach_channel(z, not_matched)
+    {
+        if (!b.contains(z))
+            return false;
+    }
+    return true;
+}
+inline bool   ChannelSet::operator != (const ChannelSet& b) const { return !(*this == b); }
 //
 inline void   ChannelSet::intersect (const ChannelIdxSet& b)
 {

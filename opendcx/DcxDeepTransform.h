@@ -38,11 +38,13 @@
 #ifndef INCLUDED_DCX_DEEPTRANSFORM_H
 #define INCLUDED_DCX_DEEPTRANSFORM_H
 
-//-----------------------------------------------------------------------------
+//=============================================================================
 //
 //  class  DeepTransform
+//  enum   DeepTransform::FilterMode
+//  struct DeepTransform::SegmentRef
 //
-//-----------------------------------------------------------------------------
+//=============================================================================
 
 #include "DcxDeepTile.h"
 
@@ -53,29 +55,41 @@
 #endif
 #include <OpenEXR/ImathMatrix.h>
 
+#include <OpenEXR/IlmThreadMutex.h> // for matrix-inversion lock
 
-//-----------------------------------------------------------------------------------------
-// TODO: Seems like these convenience functions should be in Imath where M_PI is defined,
-// or from a standard lib. Suggestions?
+
+//-------------------------
+//!rst:cpp:begin::
+//.. _deeptransform_class:
+//
+//DeepTransform
+//=============
+//-------------------------
+
+
+//=============================================================================
+// TODO: Seems like these convenience functions should be in Imath where M_PI
+//      is defined, or from a standard lib. Suggestions?
 #include <OpenEXR/ImathPlatform.h> // for M_PI
 
 template <class T>
 T radians (T degrees) { return degrees*(M_PI/180); }
 template <class T>
 T degrees (T radians) { return radians*(180/M_PI); }
-//-----------------------------------------------------------------------------------------
+//=============================================================================
 
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
 
+//=========================
+//
+//  class DeepTransform
+// 
+//=========================
 //-----------------------------------------------------------------------------
 //
-// class DeepTransform
-//      Supports 2D transforms with subpixel mask resampling.
-//
-//      (TODO:) Will also handle limited Z transforms that shift / scale the
-//              deep samples in depth.
+//  Supports 2D transforms with subpixel mask resampling.
 //
 //-----------------------------------------------------------------------------
 
@@ -94,13 +108,67 @@ class DCX_EXPORT DeepTransform
     };
 
 
+    //
+    // Sampling rate for subpixel mask reconstruction
+    //
+
+    enum SuperSamplingMode
+    {
+        SS_RATE_1,
+        SS_RATE_2,
+        SS_RATE_4,
+        SS_RATE_8,
+        SS_RATE_16,
+        SS_RATE_32,
+        //
+        SS_RATE_MAX
+    };
+
+
+    //------------------------------------------------------------------------
+    //  struct SampleOffset
+    //      Subpixel offsets and weight
+    //------------------------------------------------------------------------
+
+    struct SampleOffset
+    {
+        float   dx, dy, wt;
+    };
+
+    typedef std::vector<SampleOffset>       SampleOffsetTable;
+    typedef std::vector<SampleOffsetTable>  SampleOffsetTableList;
+
+
+    //------------------------------------------------------------------------
+    //  struct DeepTransform::SegmentRef
+    //      Used to keep track of the segments from multiple input deep pixels
+    //      possibly contributing to one output pixel.
+    //------------------------------------------------------------------------
+
+    struct SegmentRef
+    {
+        int32_t     x, y;
+        int32_t     segment;
+        float       Zf;
+        SpMask8     spmask;
+
+        SegmentRef (int32_t _x, int32_t _y, int32_t _segment,
+                    float _Zf,
+                    const SpMask8& _spmask);
+
+        bool operator < (const SegmentRef& b) const;
+    };
+
+
   public:
 
-    DeepTransform (int super_sampling=4,
+    DeepTransform (SuperSamplingMode super_sampling=SS_RATE_4,
                    FilterMode filter_mode=FILTER_BOX);
+
     DeepTransform (const IMATH_NAMESPACE::M44f&,
-                   int super_sampling=4,
+                   SuperSamplingMode super_sampling=SS_RATE_4,
                    FilterMode filter_mode=FILTER_BOX);
+
     virtual ~DeepTransform ();
 
 
@@ -108,7 +176,34 @@ class DCX_EXPORT DeepTransform
     // Filter mode used during sample().
     //
 
-    bool filterMode() const;
+    FilterMode  filterMode () const;
+    void        setFilterMode (FilterMode);
+
+
+    //
+    // Supersampling mode and rate value used during sample().
+    //
+
+    SuperSamplingMode   superSamplingMode () const;
+    virtual uint32_t    superSamplingRate () const;
+    virtual uint32_t    superSamplingWidth () const;
+
+    //
+    // Set the supersampling mode and fill the supersample offset table(s).
+    // Default implementation does uniform distribution of subpixel sample
+    // offsets.
+    //
+
+    virtual void        setSuperSamplingMode (SuperSamplingMode,
+                                              bool force=false);
+
+    //
+    // Sample offset table access.
+    //
+
+    size_t                              numSuperSamplingTables() const;
+    const SampleOffsetTable&            getSuperSamplingTable (size_t i=0) const;
+    virtual const SampleOffsetTable&    getSuperSamplingTable (int pixel_x, int pixel_y) const;
 
 
     //
@@ -128,17 +223,15 @@ class DCX_EXPORT DeepTransform
 
     void    scale (float s);
     void    scale (float sx, float sy);
-    void    scale (const IMATH_NAMESPACE::V2f& v);
-    void    scaleZ (float sz);
+    void    scale (const IMATH_NAMESPACE::V2f& s);
 
     void    translate (float tx, float ty);
-    void    translate (const IMATH_NAMESPACE::V2f& v);
-    void    translateZ (float tz);
+    void    translate (const IMATH_NAMESPACE::V2f& t);
 
 
-    //
-    // Transform through forward matrix.
-    //
+    //-------------------------------------------
+    // Forward-transform xy coord through matrix.
+    //-------------------------------------------
 
     void         transform (float x,
                             float y,
@@ -146,13 +239,14 @@ class DCX_EXPORT DeepTransform
                             float& outY,
                             const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
     IMATH_NAMESPACE::V2f   transform (const IMATH_NAMESPACE::V2f&,
-                            const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
+                                      const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
     IMATH_NAMESPACE::Box2i transform (const IMATH_NAMESPACE::Box2i&,
-                            const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
+                                      const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
 
-    //
-    // Transform through inverse matrix.
-    //
+
+    //---------------------------------------------------
+    // Reverse-transform xy coord through inverse matrix.
+    //---------------------------------------------------
 
     void         backTransform (float x,
                                 float y,
@@ -160,13 +254,14 @@ class DCX_EXPORT DeepTransform
                                 float& outY,
                                 const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
     IMATH_NAMESPACE::V2f   backTransform (const IMATH_NAMESPACE::V2f&,
-                                const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
+                                          const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
     IMATH_NAMESPACE::Box2i backTransform (const IMATH_NAMESPACE::Box2i&,
-                                const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
+                                          const IMATH_NAMESPACE::Box2i* clamp_to=0) const;
 
-    //
-    // Transform with provided matrix.
-    //
+
+    //-----------------------------------------
+    // Transform xy coord with provided matrix.
+    //-----------------------------------------
 
     static void transform (float x,
                            float y,
@@ -181,9 +276,9 @@ class DCX_EXPORT DeepTransform
                            IMATH_NAMESPACE::Box2i& out);
 
 
-    //
+    //------------------------------------
     // Clamp x/y values to a bounding-box.
-    //
+    //------------------------------------
 
     static void clampToBbox (float& x,
                              float& y,
@@ -198,40 +293,120 @@ class DCX_EXPORT DeepTransform
     static void clampToBbox (IMATH_NAMESPACE::Box2i& bbox,
                              const IMATH_NAMESPACE::Box2i& clamp_bbox);
 
+
+    //------------------------------------
+    // DeepPixel sampling methods
+    //------------------------------------
+
     //
-    // Sample input deep pixels with subpixel-mask resampling.
+    // Sample all input deep pixels contributing to output deep pixel outX/outY.
     //
 
-    virtual void sample (int outX,
-                         int outY,
+    virtual void sample (int outX, int outY,
                          const DeepTile& deep_in_tile,
-                         Dcx::DeepPixel& out_pixel);
+                         const ChannelSet& sample_channels,
+                         Dcx::DeepPixel& deep_out_pixel);
+
+    //
+    // Transform a single input deep pixel and resample it to an output deep tile.
+    //
+
+    virtual void transformPixel (const DeepTile& deep_in_tile,
+                                 int inX, int inY,
+                                 DeepTile& deep_out_tile);
 
 
-    virtual void transformTile (const DeepTile& in_tile,
-                                DeepTile& out_tile);
+    //
+    // Transform all the pixels of a tile.
+    //
+
+    virtual void transformTile (const DeepTile& deep_in_tile,
+                                DeepTile& deep_out_tile);
+
+
+    //
+    //  Sample deep pixels contributing to output deep pixel outX/outY from
+    //  a set of preselected input segments, with subpixel-mask resampling.
+    //
+    //  Note: deep_out_pixel is not cleared by this method, allowing multiple
+    //  input DeepPixels to be combined into it.
+    //
+    //  Note: the segment ref list should be z-sorted prior to calling this
+    //  method to allow the generated output segments to combine more readily:
+    //      std::sort(sample_segments.begin(), sample_segments.end());
+    //
+    //  This method is called by the other sample/transform methods and
+    //  does the actual work of resampling the segments.
+    //
+
+    void    sampleSegments (const DeepTile& deep_in_tile,
+                            const std::vector<SegmentRef>& sample_segments,
+                            const ChannelSet& sample_channels,
+                            int outX, int outY,
+                            Dcx::DeepPixel& deep_out_pixel);
 
 
   protected:
 
+    //
+    // Fill the supersample offset table(s).
+    // Default implementation does uniform distribution of subpixel sample
+    // offsets.
+    //
+
+    virtual void    fillSuperSamplingTables (uint32_t ss_width,
+                                             uint32_t num_tables=1);
+
+
+    // Assigned vars:
     IMATH_NAMESPACE::M44f   m_matrix;           // Scale/rot/trans matrix
+    SuperSamplingMode       m_ss_mode;          // Sampling rate mode for subpixel mask reconstruction
+    FilterMode              m_filter_mode;      // What kind of filtering to perform
+    SampleOffsetTableList   m_sp_offset_tables; // List of super-sample subpixel offset tables
+
+    // Derived vars:
     IMATH_NAMESPACE::M44f   m_imatrix;          // Inverse scale/rot/trans matrix
     bool                    m_updated;          // Is inverse matrix up to date?
-    float                   m_zTranslate;       // Separate from matrix for convenience
-    float                   m_zScale;           // Separate from matrix for convenience
-    bool                    m_filter_mode;      // What kind of filtering to perform
-    int                     m_ss_factor;        // Sampling rate (can be different than subpixel mask res)
+
+    ILMTHREAD_NAMESPACE::Mutex m_mutex;         // For locking matrix inversion and sample-table build
 
 };
 
 
+
+//----------
+//!rst:cpp:end::
+//----------
 
 //-----------------
 // Inline Functions
 //-----------------
 
 inline
-bool DeepTransform::filterMode () const { return m_filter_mode; }
+DeepTransform::SegmentRef::SegmentRef (int32_t _x, int32_t _y,
+                                       int32_t _segment,
+                                       float _Zf,
+                                       const SpMask8& _spmask) :
+    x(_x), y(_y),
+    segment(_segment),
+    Zf(_Zf),
+    spmask((_spmask == SpMask8::zeroCoverage)?SpMask8::fullCoverage:_spmask)
+{
+    //
+}
+inline
+bool DeepTransform::SegmentRef::operator < (const SegmentRef& b) const { return (Zf < b.Zf); }
+//--------------------------------------------------------
+inline
+DeepTransform::FilterMode DeepTransform::filterMode () const { return m_filter_mode; }
+inline
+void DeepTransform::setFilterMode (DeepTransform::FilterMode m) { m_filter_mode = m; }
+inline
+DeepTransform::SuperSamplingMode DeepTransform::superSamplingMode () const { return m_ss_mode; }
+inline
+size_t DeepTransform::numSuperSamplingTables() const { return m_sp_offset_tables.size(); }
+inline
+const DeepTransform::SampleOffsetTable& DeepTransform::getSuperSamplingTable (size_t i) const { return m_sp_offset_tables[i]; }
 inline
 const IMATH_NAMESPACE::M44f& DeepTransform::matrix () const { return m_matrix; }
 inline
@@ -252,17 +427,13 @@ void DeepTransform::scale (float s) { m_matrix.scale(IMATH_NAMESPACE::V3f(s, s, 
 inline
 void DeepTransform::scale (float sx, float sy) { m_matrix.scale(IMATH_NAMESPACE::V3f(sx, sy, 1.0f)); m_updated = false; }
 inline
-void DeepTransform::scale (const IMATH_NAMESPACE::V2f& v) { m_matrix.scale(IMATH_NAMESPACE::V3f(v.x, v.y, 1.0f)); m_updated = false; }
-inline
-void DeepTransform::scaleZ (float sz) { m_zScale = sz; }
+void DeepTransform::scale (const IMATH_NAMESPACE::V2f& s) { m_matrix.scale(IMATH_NAMESPACE::V3f(s.x, s.y, 1.0f)); m_updated = false; }
 //
 inline
 void DeepTransform::translate (float tx, float ty) { m_matrix.translate(IMATH_NAMESPACE::V3f(tx, ty, 0.0f)); m_updated = false; }
 inline
-void DeepTransform::translate (const IMATH_NAMESPACE::V2f& v) { m_matrix.translate(IMATH_NAMESPACE::V3f(v.x, v.y, 0.0f)); m_updated = false; }
-inline
-void DeepTransform::translateZ (float tz) { m_zTranslate = tz; }
-//
+void DeepTransform::translate (const IMATH_NAMESPACE::V2f& t) { m_matrix.translate(IMATH_NAMESPACE::V3f(t.x, t.y, 0.0f)); m_updated = false; }
+//----------------------------------
 inline
 /*static*/
 void DeepTransform::clampToBbox (float& x, float& y, const IMATH_NAMESPACE::Box2i& clamp_bbox)
@@ -286,7 +457,7 @@ void DeepTransform::clampToBbox (IMATH_NAMESPACE::V2i& v, const IMATH_NAMESPACE:
 inline
 /*static*/
 void DeepTransform::clampToBbox (IMATH_NAMESPACE::Box2i& bbox, const IMATH_NAMESPACE::Box2i& clamp_bbox) { clampToBbox(bbox.min, clamp_bbox); clampToBbox(bbox.max, clamp_bbox); }
-//
+//----------------------------------
 inline
 /*static*/
 void DeepTransform::transform (float x, float y, const IMATH_NAMESPACE::M44f& m, float& outX, float& outY)
@@ -326,7 +497,7 @@ IMATH_NAMESPACE::Box2i DeepTransform::transform (const IMATH_NAMESPACE::Box2i& b
         clampToBbox(out, *clamp_to);
     return out;
 }
-//
+//----------------------------------
 inline
 void DeepTransform::backTransform (float x, float y, float& outX, float& outY, const IMATH_NAMESPACE::Box2i* clamp_to) const
 {
@@ -352,6 +523,7 @@ IMATH_NAMESPACE::Box2i DeepTransform::backTransform (const IMATH_NAMESPACE::Box2
         clampToBbox(out, *clamp_to);
     return out;
 }
+
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_EXIT
 

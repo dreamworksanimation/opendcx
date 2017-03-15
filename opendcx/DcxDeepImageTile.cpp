@@ -46,71 +46,65 @@ OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
 
 DeepImageInputTile::DeepImageInputTile (ChannelContext& channel_ctx,
-                                        bool tileYup) :
-    DeepTile(channel_ctx, WRITE_DISABLED, tileYup),
+                                        bool yAxisUp) :
+    DeepTile(channel_ctx, WRITE_DISABLED, yAxisUp),
+    ImageFormat(),
     m_image_level(NULL)
 {
     //
 }
 
-
-DeepImageInputTile::DeepImageInputTile (const Imf::DeepImage& image,
+DeepImageInputTile::DeepImageInputTile (const Imf::DeepImage& imfDeepImage,
                                         ChannelContext& channel_ctx,
-                                        bool tileYup) :
-    DeepTile(channel_ctx, WRITE_DISABLED, tileYup),
+                                        bool yAxisUp) :
+    DeepTile(channel_ctx, WRITE_DISABLED, yAxisUp),
+    ImageFormat(),
     m_image_level(NULL)
 {
-    if (image.numLevels() > 0)
+    if (imfDeepImage.numLevels() > 0)
+        copyFromLevel(imfDeepImage, 0/*level*/);
+    else
     {
-        copyFromLevel(image, 0/*level*/);
-        m_display_window = m_data_window;
+        // TODO: Level out of range - throw an exception?
     }
+    ImageFormat::m_displayWindow = m_dataWindow;
+}
+
+DeepImageInputTile::DeepImageInputTile (const Imf::Header& header,
+                                        const Imf::DeepImage& imfDeepImage,
+                                        ChannelContext& channel_ctx,
+                                        bool yAxisUp) :
+    DeepTile(header, channel_ctx, WRITE_DISABLED, yAxisUp),
+    ImageFormat(header),
+    m_image_level(NULL)
+{
+    if (imfDeepImage.numLevels() > 0)
+        copyFromLevel(imfDeepImage, 0/*level*/);
     else
     {
         // TODO: Level out of range - throw an exception?
     }
 }
 
-
-DeepImageInputTile::DeepImageInputTile (const Imf::Header& header,
-                                        const Imf::DeepImage& image,
-                                        ChannelContext& channel_ctx,
-                                        bool tileYup) :
-    DeepTile(channel_ctx, WRITE_DISABLED, tileYup),
-    m_image_level(NULL)
+DeepImageInputTile::DeepImageInputTile (const DeepTile& b) :
+    DeepTile(b),
+    ImageFormat()
 {
-    if (image.numLevels() > 0)
-    {
-        m_display_window = header.displayWindow();
-        copyFromLevel(image, 0/*level*/);
-    }
-    else
-    {
-        // TODO: Level out of range - throw an exception?
-    }
+    //
 }
 
 
 bool
-DeepImageInputTile::copyFromLevel (const Imf::DeepImage& image,
+DeepImageInputTile::copyFromLevel (const Imf::DeepImage& imfDeepImage,
                                    int level)
 {
-    if (level >= image.numLevels())
+    if (level >= imfDeepImage.numLevels())
         return false;
 
-    m_image_level = &image.level(level);
-    m_data_window = image.dataWindowForLevel(level);
-
-    if (m_tile_yUp)
-    {
-        // Flip data window vertically:
-        const int ot = m_data_window.max.y;
-        m_data_window.max.y = m_display_window.max.y - m_data_window.min.y;
-        m_data_window.min.y = m_display_window.max.y - ot;
-    }
+    m_image_level = &imfDeepImage.level(level);
+    m_dataWindow = flipY(imfDeepImage.dataWindowForLevel(level)); // Possibly flip data window vertically
     m_channels.clear();
-    m_channel_aliases.clear();
-    m_num_spmask_chans = 0;
+    m_spmask_channel[0] = m_spmask_channel[1] = Dcx::Chan_Invalid;
     m_flags_channel = Dcx::Chan_Invalid;
 
     if (!updateChannelPtrs())
@@ -129,12 +123,13 @@ DeepImageInputTile::updateChannelPtrs ()
     m_chan_ptrs.clear();
     std::vector<Dcx::ChannelIdx> chans;
     std::vector<const Imf::DeepImageChannel*> ptrs;
-    Dcx::ChannelAliasPtrSet tile_channels; // set of channels to initialize tile to
+    Dcx::ChannelSet tile_channels; // set of channels to initialize tile to
 
 #ifdef DEBUG
     assert(m_channel_ctx);
 #endif
 
+    chans.reserve(10);
     for (Imf::DeepImageLevel::ConstIterator it=m_image_level->begin(); it != m_image_level->end(); ++it)
     {
 #if 1
@@ -145,7 +140,7 @@ DeepImageInputTile::updateChannelPtrs ()
         chans.push_back(c->channel());
         ptrs.push_back(&it.channel());
 
-        tile_channels.insert(c);
+        tile_channels += c->channel();
 
 #else
         Dcx::ChannelIdx z = Dcx::getChannel(it.name().c_str());
@@ -175,13 +170,17 @@ DeepImageInputTile::updateChannelPtrs ()
             ptrs.push_back(&it.channel());
         }
 #endif
+
     }
 
-    // Update the active channel set:
-    DeepTile::updateChannels(tile_channels);
+    DeepTile::setChannels(tile_channels);
 
-    m_chan_ptrs.resize(m_channel_ctx->lastAssignedChannel());
-    memset(&(m_chan_ptrs[0]), 0, sizeof(Imf::DeepImageChannel*)*m_chan_ptrs.size()); // << TODO: is this needed?
+    // Update the active channel set:
+    m_chan_ptrs.resize(m_channel_ctx->lastAssignedChannel()+1);
+#ifdef DEBUG
+    assert(m_chan_ptrs.size() > 0);
+#endif
+    memset(&m_chan_ptrs[0], 0, sizeof(Imf::DeepImageChannel*)*m_chan_ptrs.size()); // << TODO: is this needed?
     for (size_t i=0; i < chans.size(); ++i)
         m_chan_ptrs[chans[i]] = ptrs[i];
 
@@ -195,7 +194,7 @@ DeepImageInputTile::getNumSamplesAt (int x, int y) const
 {
     if (!m_image_level || !isActivePixel(x, y))
         return 0;
-    return m_image_level->sampleCounts()(x, (m_tile_yUp)?(m_display_window.max.y-y):y);
+    return m_image_level->sampleCounts()(x, flipY(y));
 }
 
 
@@ -214,7 +213,7 @@ DeepImageInputTile::getDeepPixel (int x,
     if (m_channels.empty())
         return true;
 
-    const size_t nSamples = m_image_level->sampleCounts()(x, (m_tile_yUp)?(m_display_window.max.y-y):y);
+    const size_t nSamples = m_image_level->sampleCounts()(x, flipY(y));
     if (nSamples == 0)
         return true;
 
@@ -222,9 +221,8 @@ DeepImageInputTile::getDeepPixel (int x,
     pixel.reserve(nSamples);
 
     Dcx::ChannelSet copy_channels(m_channels);
-    copy_channels -= Dcx::Mask_Deep;
+    copy_channels -= Dcx::Mask_Depths;
     copy_channels -= Dcx::Mask_DeepMetadata;
-    copy_channels -= Dcx::Mask_Z;
     pixel.setChannels(copy_channels);
 
     const bool have_Zb  = (m_channels.contains(Dcx::Chan_ZBack));
@@ -240,7 +238,7 @@ DeepImageInputTile::getDeepPixel (int x,
         if (have_Zb)
         {
             ds.Zb = getChannelSampleValueAt(x, y, sample, m_chan_ptrs[Dcx::Chan_ZBack]);
-            // Clamp Zback to reasonable values - allow infinity:
+            // Clamp Zback to reasonable values, but allow infinity:
             if (isnan(ds.Zb) || ds.Zb < ds.Zf)
                 ds.Zb = ds.Zf;
         }
@@ -255,7 +253,7 @@ DeepImageInputTile::getDeepPixel (int x,
         const size_t dsindex = pixel.append(ds);
         Dcx::Pixelf& p = pixel.getSegmentPixel(dsindex);
         foreach_channel(z, copy_channels)
-            p[*z] = getChannelSampleValueAt(x, y, sample, m_chan_ptrs[*z]);
+            p[z] = getChannelSampleValueAt(x, y, sample, m_chan_ptrs[z]);
     }
 
     return true;
@@ -269,27 +267,18 @@ DeepImageInputTile::getSampleMetadata (int x,
                                        size_t sample,
                                        Dcx::DeepMetadata& metadata) const
 {
-    if (m_num_spmask_chans == 2)
-    {
-        metadata.spmask.fromFloat(getChannelSampleValueAt(x, y, sample, m_chan_ptrs[Dcx::Chan_SpBits1]),
-                                  getChannelSampleValueAt(x, y, sample, m_chan_ptrs[Dcx::Chan_SpBits2]));
-
-    }
-    else if (m_num_spmask_chans == 1)
-    {
-        //metadata.spmask = Dcx::spMask4From1Float(getChannelSampleValueAt(x, y, sample, m_chan_ptrs[Dcx::Chan_SpBits1]));
-
-    }
+    // Extract subpixel masks from spmask channels if they're assigned:
+    if (hasSpMasks())
+        metadata.spmask.fromFloat(getChannelSampleValueAt(x, y, sample, m_chan_ptrs[m_spmask_channel[0]]),
+                                  getChannelSampleValueAt(x, y, sample, m_chan_ptrs[m_spmask_channel[1]]));
     else
-    {
         metadata.spmask = Dcx::SpMask8::zeroCoverage; // default to zero coverage (legacy data)
-    }
 
-    // Extract flags from flags channel (convert from floating-point integer value):
-    if (m_flags_channel != Dcx::Chan_Invalid)
-        metadata.flags = (Dcx::DeepFlag)floorf(getChannelSampleValueAt(x, y, sample, m_chan_ptrs[m_flags_channel]));
+    // Extract flags from flags channel:
+    if (hasFlags())
+        metadata.flags.fromFloat(getChannelSampleValueAt(x, y, sample, m_chan_ptrs[m_flags_channel]));
     else
-        metadata.flags = Dcx::DEEP_EMPTY_FLAG;
+        metadata.flags.clearAll();
 
     return true;
 }
@@ -302,33 +291,66 @@ DeepImageInputTile::getSampleMetadata (int x,
 DeepImageOutputTile::DeepImageOutputTile (const IMATH_NAMESPACE::Box2i& display_window,
                                           const IMATH_NAMESPACE::Box2i& data_window,
                                           bool sourceWindowsYup,
-                                          const ChannelAliasPtrSet& channels,
+                                          const ChannelSet& channels,
                                           ChannelContext& channel_ctx,
-                                          bool tileYup) :
-    DeepTile (display_window, data_window, sourceWindowsYup, channels, channel_ctx, WRITE_RANDOM, tileYup),
+                                          bool yAxisUp) :
+    DeepTile(data_window,
+             display_window.max.y,
+             sourceWindowsYup,
+             channels,
+             channel_ctx,
+             WRITE_RANDOM,
+             yAxisUp),
+    ImageFormat(std::string(""), display_window, 1.0f/*pa*/),
     m_file(0)
 {
 #if 0
     // Make sure output channels have Z's, metadata enabled:
     m_channels += Dcx::Mask_Deep;
-    switch (m_num_spmask_chans)
-    {
-    case 1: m_channels += Mask_SpMask4; break;
-    default:
-    case 2: m_channels += Mask_SpMask8; break;
-    //case 8: m_channels += Mask_SpMask4; break;
-    }
+    m_channels += m_spmask_channel[0];
+    m_channels += m_spmask_channel[1];
     m_channels += m_flags_channel;
 #endif
-    resizeDataWindow(data_window);
+    setDataWindow(data_window, sourceWindowsYup);
 }
 
 
-DeepImageOutputTile::DeepImageOutputTile (const DeepTile& b) :
+DeepImageOutputTile::DeepImageOutputTile (const DeepImageInputTile& b,
+                                          const IMATH_NAMESPACE::Box2i& data_window,
+                                          bool sourceWindowYup) :
     DeepTile(b),
+    ImageFormat(b),
     m_file(0)
 {
-    resizeDataWindow(m_data_window);
+    setDataWindow(data_window, sourceWindowYup);
+}
+
+DeepImageOutputTile::DeepImageOutputTile (const ImageFormat& format,
+                                          const DeepTile& tile,
+                                          const IMATH_NAMESPACE::Box2i& data_window,
+                                          bool sourceWindowYup) :
+    DeepTile(tile),
+    ImageFormat(format),
+    m_file(0)
+{
+    setDataWindow(data_window, sourceWindowYup);
+}
+
+DeepImageOutputTile::DeepImageOutputTile (const DeepImageInputTile& b) :
+    DeepTile(b),
+    ImageFormat(b),
+    m_file(0)
+{
+    setDataWindow(m_dataWindow, m_yaxis_up);
+}
+
+DeepImageOutputTile::DeepImageOutputTile (const ImageFormat& format,
+                                          const DeepTile& tile) :
+    DeepTile(tile),
+    ImageFormat(format),
+    m_file(0)
+{
+    setDataWindow(m_dataWindow, m_yaxis_up);
 }
 
 
@@ -338,6 +360,32 @@ DeepImageOutputTile::~DeepImageOutputTile ()
     for (size_t y=0; y < nLines; ++y)
         delete m_deep_lines[y];
     delete m_file;
+}
+
+
+/*virtual*/
+void
+DeepImageOutputTile::setChannels (const ChannelSet& channels)
+{
+    if (channels == m_channels)
+        return; // no change, do nothing
+    deleteDeepLines();
+    DeepTile::setChannels(channels);
+}
+
+
+/*virtual*/
+void
+DeepImageOutputTile::setDataWindow (const IMATH_NAMESPACE::Box2i& data_window,
+                                    bool sourceWindowYAxisUp)
+{
+    if (data_window == m_dataWindow)
+        return; // no change, do nothing
+    deleteDeepLines();
+    DeepTile::setDataWindow(data_window, sourceWindowYAxisUp);
+    size_t nLines = std::max(0, h());
+    m_deep_lines.resize(nLines);
+    memset(&m_deep_lines[0], 0, nLines*sizeof(DeepLine*));
 }
 
 
@@ -371,18 +419,6 @@ DeepImageOutputTile::deleteDeepLines ()
     }
 }
 
-
-void
-DeepImageOutputTile::resizeDataWindow (const IMATH_NAMESPACE::Box2i& data_window)
-{
-    deleteDeepLines();
-    m_data_window = data_window;
-    size_t nLines = std::max(0, h());
-    m_deep_lines.resize(nLines);
-    memset(&m_deep_lines[0], 0, nLines*sizeof(DeepLine*));
-}
-
-
 /*virtual*/
 size_t
 DeepImageOutputTile::getNumSamplesAt (int x, int y) const
@@ -390,7 +426,7 @@ DeepImageOutputTile::getNumSamplesAt (int x, int y) const
     const DeepLine* dl = getLine(y);
     if (!dl)
         return 0;
-    x -= m_data_window.min.x;
+    x -= m_dataWindow.min.x;
     return (x < 0 || x >= (int)dl->samples_per_pixel.size())?0:dl->samples_per_pixel[x];
 }
 
@@ -417,7 +453,11 @@ DeepImageOutputTile::DeepLine::get (int xoffset,
 
     const uint32_t nSegments = samples_per_pixel[xoffset];
 
+    ChannelSet out_channels(channels);
+    out_channels -= Mask_DeepMetadata;
+
     deep_pixel.clear();
+    deep_pixel.setChannels(out_channels);
     if (nSegments == 0)
         return;
     deep_pixel.reserve(nSegments);
@@ -428,31 +468,28 @@ DeepImageOutputTile::DeepLine::get (int xoffset,
     Dcx::Pixelf dp(deep_pixel.channels());
     float sp1, sp2;
 
-    ChannelSet copy_channels(deep_pixel.channels());
-    copy_channels &= channels;
-
     for (uint32_t i=0; i < nSegments; ++i)
     {
         ds.Zf = ds.Zb = 0.0f;
         sp1 = sp2 = 0.0f;
-        ds.metadata.flags  = 0x0;
+        ds.metadata.flags.clearAll();
 
         int chan_index = 0;
-        foreach_channel(z, copy_channels)
+        foreach_channel(z, channels)
         {
             const float v = channel_arrays[chan_index][foffset + i];
-            if (*z == Dcx::Chan_ZFront)
+            if (z == Dcx::Chan_ZFront)
                 ds.Zf = v;
-            else if (*z == Dcx::Chan_ZBack)
+            else if (z == Dcx::Chan_ZBack)
                 ds.Zb = v;
-            else if (*z == Dcx::Chan_SpBits1)
+            else if (z == Dcx::Chan_SpBits1)
                 sp1 = v;
-            else if (*z == Dcx::Chan_SpBits2)
+            else if (z == Dcx::Chan_SpBits2)
                 sp2 = v;
-            else if (*z == Dcx::Chan_DeepFlags)
-                ds.metadata.flags = (int)floorf(v);
+            else if (z == Dcx::Chan_DeepFlags)
+                ds.metadata.flags.fromFloat(v);
             else
-                dp[*z] = v;
+                dp[z] = v;
             ++chan_index;
         }
 
@@ -482,16 +519,16 @@ DeepImageOutputTile::DeepLine::getMetadata(int xoffset,
     const uint32_t foffset = floatOffset(xoffset) + sample;
 
     float sp1=0.0f, sp2=0.0f;
-    metadata.flags = 0x0;
+    metadata.flags.clearAll();
 
     int chan_index = 0;
     foreach_channel(z, channels)
     {
-        if (*z == Dcx::Chan_SpBits1)
+        if (z == Dcx::Chan_SpBits1)
             sp1 = channel_arrays[chan_index][foffset];
-        else if (*z == Dcx::Chan_SpBits2)
+        else if (z == Dcx::Chan_SpBits2)
             sp2 = channel_arrays[chan_index][foffset];
-        else if (*z == Dcx::Chan_DeepFlags)
+        else if (z == Dcx::Chan_DeepFlags)
             metadata.flags = (int)floorf(channel_arrays[chan_index][foffset]);
         ++chan_index;
     }
@@ -507,7 +544,7 @@ DeepImageOutputTile::DeepLine::set (int xoffset,
 #ifdef DEBUG
     assert(xoffset >= 0 && xoffset < samples_per_pixel.size());
 #endif
-    const size_t nWriteSegments = deep_pixel.size();
+    const uint32_t nWriteSegments = deep_pixel.size();
     if (nWriteSegments == 0)
     {
         clear(xoffset);
@@ -547,40 +584,38 @@ DeepImageOutputTile::DeepLine::set (int xoffset,
         }
     }
 
-    samples_per_pixel[xoffset] = nWriteSegments;
-
-    if (nWriteSegments > 0)
+    float sp1, sp2, flags;
+    // Copy segment channel data:
+    for (uint32_t i=0; i < nWriteSegments; ++i)
     {
-        float sp1, sp2;
-        // Copy segment channel data:
-        for (uint32_t i=0; i < nWriteSegments; ++i)
-        {
-            const DeepSegment& segment = deep_pixel[i];
-            const Pixelf& pixel = deep_pixel.getSegmentPixel(segment);
-            segment.spMask().toFloat(sp1, sp2);
+        const DeepSegment& segment = deep_pixel[i];
+        segment.spMask().toFloat(sp1, sp2);
+        flags = segment.flags().toFloat();
+        const Pixelf& pixel = deep_pixel.getSegmentPixel(segment);
 
-            float v;
-            int chan_index = 0;
-            foreach_channel(z, channels)
-            {
-                if (*z == Dcx::Chan_ZFront)
-                    v = segment.Zf;
-                else if (*z == Dcx::Chan_ZBack)
-                    v = segment.Zb;
-                else if (*z == Dcx::Chan_SpBits1)
-                    v = sp1;
-                else if (*z == Dcx::Chan_SpBits2)
-                    v = sp2;
-                else if (*z == Dcx::Chan_DeepFlags)
-                    v = float(segment.flags());
-                else if (deep_pixel.channels().contains(*z))
-                    v = pixel[*z];
-                else
-                    v = 0.0f;
-                channel_arrays[chan_index++][foffset + i] = v;
-            }
+        float v;
+        int chan_index = 0;
+        foreach_channel(z, channels)
+        {
+            if (z == Dcx::Chan_ZFront)
+                v = segment.Zf;
+            else if (z == Dcx::Chan_ZBack)
+                v = segment.Zb;
+            else if (z == Dcx::Chan_SpBits1)
+                v = sp1;
+            else if (z == Dcx::Chan_SpBits2)
+                v = sp2;
+            else if (z == Dcx::Chan_DeepFlags)
+                v = flags;
+            else if (deep_pixel.channels().contains(z))
+                v = pixel[z];
+            else
+                v = 0.0f;
+            channel_arrays[chan_index++][foffset + i] = v;
         }
     }
+
+    samples_per_pixel[xoffset] = nWriteSegments;
 }
 
 void
@@ -612,9 +647,13 @@ DeepImageOutputTile::DeepLine::clear (int xoffset)
 DeepImageOutputTile::DeepLine*
 DeepImageOutputTile::createDeepLine (int y)
 {
-    if (y < m_data_window.min.y || y > m_data_window.max.y)
+    if (y < m_dataWindow.min.y || y > m_dataWindow.max.y)
         return 0; // don't crash...  TODO: throw exception?
-    y -= m_data_window.min.y;
+    y -= m_dataWindow.min.y;
+#ifdef DEBUG
+    assert(m_deep_lines.size() > 0);
+    assert(y >= 0 && y < m_deep_lines.size());
+#endif
     DeepLine* dl = m_deep_lines[y];
     if (!dl)
         m_deep_lines[y] = dl = new DeepLine(w(), channels());
@@ -636,11 +675,11 @@ DeepImageOutputTile::getDeepPixel (int x,
     if (m_channels.empty())
         return true;
 
-    DeepLine* dl = ((DeepImageOutputTile*)this)->createDeepLine(y);
+    DeepLine* dl = (const_cast<DeepImageOutputTile*>(this))->createDeepLine(y);
     if (!dl)
         return false; // don't crash...
 
-    dl->get(x - m_data_window.min.x, pixel);
+    dl->get(x - m_dataWindow.min.x, pixel);
 
     return true;
 }
@@ -657,11 +696,11 @@ DeepImageOutputTile::getSampleMetadata (int x,
     if (m_channels.empty())
         return true;
 
-    DeepLine* dl = ((DeepImageOutputTile*)this)->createDeepLine(y);
+    DeepLine* dl = (const_cast<DeepImageOutputTile*>(this))->createDeepLine(y);
     if (!dl)
         return false; // don't crash...
 
-    dl->getMetadata(x - m_data_window.min.x, sample, metadata);
+    dl->getMetadata(x - m_dataWindow.min.x, sample, metadata);
 
     return true;
 }
@@ -675,16 +714,11 @@ DeepImageOutputTile::setDeepPixel (int x,
                                    const Dcx::DeepPixel& deep_pixel)
 {
     DeepLine* dl = createDeepLine(y);
-    if (!dl || x < m_data_window.min.x || x > m_data_window.max.x)
+    if (!dl || x < m_dataWindow.min.x || x > m_dataWindow.max.x)
         return false; // don't crash...
 
-    const size_t nWriteSegments = deep_pixel.size();
-
     // Copy DeepPixel data into packed DeepLine arrays (offseting x into array range):
-    if (nWriteSegments == 0)
-        dl->clear(x - m_data_window.min.x);
-    else
-        dl->set(x - m_data_window.min.x, deep_pixel);
+    dl->set(x - m_dataWindow.min.x, deep_pixel);
 
     return true;
 }
@@ -696,10 +730,10 @@ DeepImageOutputTile::clearDeepPixel (int x,
                                      int y)
 {
     DeepLine* dl = createDeepLine(y);
-    if (!dl || x < m_data_window.min.x || x > m_data_window.max.x)
+    if (!dl || x < m_dataWindow.min.x || x > m_dataWindow.max.x)
         return false; // don't crash...
 
-    dl->clear(x - m_data_window.min.x); // Offset x into DeepLine array
+    dl->clear(x - m_dataWindow.min.x); // Offset x into DeepLine array
 
     return true;
 }
@@ -722,19 +756,21 @@ DeepImageOutputTile::setOutputFile (const char* filename,
 
     // Flip line order to match Y-up mode:
     if (line_order == Imf::DECREASING_Y)
-        line_order = (m_tile_yUp)?Imf::INCREASING_Y:Imf::DECREASING_Y;
+        line_order = (m_yaxis_up)?Imf::INCREASING_Y:Imf::DECREASING_Y;
     else if (line_order == Imf::INCREASING_Y)
-        line_order = (m_tile_yUp)?Imf::DECREASING_Y:Imf::INCREASING_Y;
+        line_order = (m_yaxis_up)?Imf::DECREASING_Y:Imf::INCREASING_Y;
     else
-        line_order = (m_tile_yUp)?Imf::DECREASING_Y:Imf::INCREASING_Y;
+        line_order = (m_yaxis_up)?Imf::DECREASING_Y:Imf::INCREASING_Y;
 
-    Imf::Header header(m_display_window,
-                       m_data_window,
-                       1.0,/*pixelAspectRatio*/
-                       IMATH_NAMESPACE::V2f(0.0f, 0.0f), /*screenWindowCenter*/
-                       1.0f, /*screenWindowWidth*/
+    Imf::Header header(displayWindow(),
+                       flipY(m_dataWindow), // Flip data window back to Y-down if tile is Y-up
+                       pixelAspectRatio(),
+                       screenWindowCenter(),
+                       screenWindowWidth(),
                        line_order,
                        Imf::ZIPS_COMPRESSION); // Single-line zip for deep (TODO always...?)
+    // Update the header params from the ImageFormat:
+    ImageFormat::toHeader(header);
 
     ChannelSet write_channels(m_channels);
     //write_channels -= Mask_SpMask8;
@@ -742,7 +778,7 @@ DeepImageOutputTile::setOutputFile (const char* filename,
 
     foreach_channel(z, write_channels)
     {
-        const ChannelAlias* c = getChannelAlias(*z);
+        const ChannelAlias* c = getChannelAlias(z);
 #ifdef DEBUG
         assert(c); // shouldn't happen...
 #endif
@@ -754,11 +790,11 @@ DeepImageOutputTile::setOutputFile (const char* filename,
 #if 0
     if (m_channels.contains(Mask_SpMask8))
     {
-        header.channels().insert("spmask.1", Imf::Channel(Imf::FLOAT));
-        header.channels().insert("spmask.2", Imf::Channel(Imf::FLOAT));
+        header.channels().insert(spMask8Channel1Name, Imf::Channel(Imf::FLOAT));
+        header.channels().insert(spMask8Channel2Name, Imf::Channel(Imf::FLOAT));
     }
     if (m_channels.contains(Mask_DeepFlags))
-        header.channels().insert("spmask.flags", Imf::Channel(Imf::HALF));
+        header.channels().insert(flagsChannelName, Imf::Channel(Imf::HALF));
 #endif
 
     delete m_file;
@@ -782,17 +818,21 @@ void
 DeepImageOutputTile::writeScanline (int y,
                                     bool flush_line)
 {
-    if (!m_file || y < m_data_window.min.y || y > m_data_window.max.y)
+    if (!m_file || y < m_dataWindow.min.y || y > m_dataWindow.max.y)
         return; // don't crash...  TODO: throw exception?
 
-    y -= m_data_window.min.y;
+    y -= m_dataWindow.min.y;
     const DeepLine* dl = m_deep_lines[y];
+    DeepLine empty_dl(w(), channels()); // dummy DeepLine for empty line
     if (!dl)
-        return; // nothing to write
+        dl = &empty_dl;
+#ifdef DEBUG
+    assert(dl); // shouldn't happen...
+#endif
 
     // Unpack the floats to arrays of the appropriate pixel types and
     // assign the frambuffer slices to them:
-    const size_t nChannels = m_channel_aliases.size();
+    const size_t nChannels = m_channels.size();
     if (nChannels == 0)
         return;
 
@@ -809,7 +849,7 @@ DeepImageOutputTile::writeScanline (int y,
 
     Imf::DeepFrameBuffer fb;
     fb.insertSampleCountSlice(Imf::Slice(Imf::UINT, 
-                                         (char*)(dl->samples_per_pixel.data() - m_data_window.min.x),
+                                         (char*)(dl->samples_per_pixel.data() - m_dataWindow.min.x),
                                          sizeof(uint32_t)/*xStride*/,
                                          0/*yStride*/));
 
@@ -817,7 +857,7 @@ DeepImageOutputTile::writeScanline (int y,
     size_t sample_stride = 0;
     foreach_channel(z, m_channels)
     {
-        const ChannelAlias* c = getChannelAlias(*z);
+        const ChannelAlias* c = getChannelAlias(z);
 #ifdef DEBUG
         assert(c); // shouldn't happen...
 #endif
@@ -888,7 +928,7 @@ DeepImageOutputTile::writeScanline (int y,
         }
 
         fb.insert(c->fileIOName(), Imf::DeepSlice(c->fileIOPixelType(),
-                                                  (char*)(ptrs.data() - m_data_window.min.x),
+                                                  (char*)(ptrs.data() - m_dataWindow.min.x),
                                                   sizeof(void*)/*xStride*/,
                                                   0/*yStride*/,
                                                   sample_stride/*sampleStride*/));
@@ -898,7 +938,7 @@ DeepImageOutputTile::writeScanline (int y,
 
     // Write line to file:
     m_file->setFrameBuffer(fb);
-    m_file->writePixels( 1/*nLines*/ );
+    m_file->writePixels(1/*nLines*/);
 
     // Free the DeepLine:
     if (flush_line)
@@ -917,7 +957,7 @@ DeepImageOutputTile::writeScanline (int y,
 void
 DeepImageOutputTile::writeTile (bool flush_tile)
 {
-    for (int y=m_data_window.min.y; y < m_data_window.max.y; ++y)
+    for (int y=m_dataWindow.min.y; y < m_dataWindow.max.y; ++y)
         writeScanline(y, flush_tile);
 }
 

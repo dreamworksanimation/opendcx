@@ -38,12 +38,13 @@
 
 //==================================================================================
 // Define our version symbols
-// Keep this in sync with OpenEXR / IlmBase!
-#define OPENDCX_VERSION        "2.02.01"
-#define OPENDCX_VERSION_INT    20201
+// Keep major & minor in sync with OpenEXR / IlmBase!
+// Patch will be used to increment the OpenDCX release number.
+#define OPENDCX_VERSION        "2.02.02"
+#define OPENDCX_VERSION_INT    20202
 #define OPENDCX_VERSION_MAJOR  2
 #define OPENDCX_VERSION_MINOR  2
-#define OPENDCX_VERSION_PATCH  1
+#define OPENDCX_VERSION_PATCH  2
 
 //==================================================================================
 // Define namespace macros

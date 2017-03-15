@@ -131,21 +131,26 @@ INCLUDE_NAMES := \
         DcxChannelContext.h \
         DcxChannelDefs.h \
         DcxChannelSet.h \
+        DcxDeepFlags.h \
         DcxDeepImageTile.h \
         DcxDeepPixel.h \
         DcxDeepTile.h \
         DcxDeepTransform.h \
+        DcxImageFormat.h \
         DcxPixel.h \
+        DcxPixelTile.h \
         DcxSpMask.h \
         version.h \
 #
 
 SRC_NAMES := \
-    DcxChannelSet.cpp \
-    DcxDeepImageTile.cpp \
-    DcxDeepPixel.cpp \
-    DcxDeepTile.cpp \
-    DcxDeepTransform.cpp \
+        DcxChannelSet.cpp \
+        DcxDeepImageTile.cpp \
+        DcxDeepPixel.cpp \
+        DcxDeepTile.cpp \
+        DcxDeepTransform.cpp \
+        DcxImageFormat.cpp \
+        DcxPixelTile.cpp \
 #
 
 #---------------------------------

@@ -44,89 +44,93 @@ OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
 DeepTile::DeepTile (ChannelContext& channel_ctx,
                     WriteAccessMode write_access_mode,
-                    bool tileYup) :
+                    bool yAxisUp) :
+    PixelTile(channel_ctx,
+              yAxisUp),
     m_write_access_mode(write_access_mode),
-    m_tile_yUp(tileYup),
-    m_display_window(IMATH_NAMESPACE::V2i(0,0), IMATH_NAMESPACE::V2i(0,0)),
-    m_data_window(IMATH_NAMESPACE::V2i(0,0), IMATH_NAMESPACE::V2i(0,0)),
-    m_channel_ctx(&channel_ctx),
-    //
-    m_num_spmask_chans(0),
     m_flags_channel(Dcx::Chan_Invalid)
 {
-    //
+    m_spmask_channel[0] = m_spmask_channel[1] = Dcx::Chan_Invalid;
 }
 
-DeepTile::DeepTile (const DeepTile& b) :
-    m_write_access_mode(b.m_write_access_mode),
-    m_tile_yUp(b.m_tile_yUp),
-    m_display_window(b.m_display_window),
-    m_data_window(b.m_data_window),
-    m_channel_ctx(b.m_channel_ctx),
-    //
-    m_channels(b.m_channels),
-    m_channel_aliases(b.m_channel_aliases),
-    m_num_spmask_chans(b.m_num_spmask_chans),
-    m_flags_channel(b.m_flags_channel)
+DeepTile::DeepTile (const Imf::Header& header,
+                    ChannelContext& channel_ctx,
+                    WriteAccessMode write_access_mode,
+                    bool yAxisUp) :
+    PixelTile(header,
+              channel_ctx,
+              yAxisUp),
+    m_write_access_mode(write_access_mode),
+    m_flags_channel(Dcx::Chan_Invalid)
 {
-    //
+    m_spmask_channel[0] = m_spmask_channel[1] = Dcx::Chan_Invalid;
 }
 
 DeepTile::DeepTile (const IMATH_NAMESPACE::Box2i& display_window,
                     const IMATH_NAMESPACE::Box2i& data_window,
                     bool sourceWindowsYup,
-                    const ChannelAliasPtrSet& channels,
+                    const ChannelSet& channels,
                     ChannelContext& channel_ctx,
                     WriteAccessMode write_access_mode,
-                    bool tileYup) :
+                    bool yAxisUp) :
+    PixelTile(display_window,
+              data_window,
+              sourceWindowsYup,
+              channels,
+              channel_ctx,
+              yAxisUp),
     m_write_access_mode(write_access_mode),
-    m_tile_yUp(tileYup),
-    m_display_window(display_window),
-    m_data_window(data_window),
-    m_channel_ctx(&channel_ctx),
-    //
     m_flags_channel(Dcx::Chan_Invalid)
 {
-    // Flip data window vertically if source windows are flipped:
-    if (tileYup != sourceWindowsYup)
-    {
-        const int ot = m_data_window.max.y;
-        m_data_window.max.y = m_display_window.max.y - m_data_window.min.y;
-        m_data_window.min.y = m_display_window.max.y - ot;
-    }
-    updateChannels(channels);
+    m_spmask_channel[0] = m_spmask_channel[1] = Dcx::Chan_Invalid;
+}
+
+DeepTile::DeepTile (const IMATH_NAMESPACE::Box2i& data_window,
+                    int top_reference,
+                    bool sourceWindowsYup,
+                    const ChannelSet& channels,
+                    ChannelContext& channel_ctx,
+                    WriteAccessMode write_access_mode,
+                    bool yAxisUp) :
+    PixelTile(data_window,
+              top_reference,
+              sourceWindowsYup,
+              channels,
+              channel_ctx,
+              yAxisUp),
+    m_write_access_mode(write_access_mode),
+    m_flags_channel(Dcx::Chan_Invalid)
+{
+    m_spmask_channel[0] = m_spmask_channel[1] = Dcx::Chan_Invalid;
+}
+
+DeepTile::DeepTile (const DeepTile& b) :
+    PixelTile(b),
+    m_write_access_mode(b.m_write_access_mode),
+    m_flags_channel(b.m_flags_channel)
+{
+    m_spmask_channel[0] = b.m_spmask_channel[0];
+    m_spmask_channel[1] = b.m_spmask_channel[1];
 }
 
 
 /*virtual*/
 void
-DeepTile::updateChannels (const ChannelAliasPtrSet& channels)
+DeepTile::setChannels (const ChannelSet& channels)
 {
-    m_channels.clear();
-    m_channel_aliases.clear();
-    m_num_spmask_chans = 0;
+    PixelTile::setChannels(channels);
+    // Get the spmask and flag channel assignments:
+    m_spmask_channel[0] = m_spmask_channel[1] = Dcx::Chan_Invalid;
     m_flags_channel = Dcx::Chan_Invalid;
-    for (ChannelAliasPtrSet::const_iterator it=channels.begin(); it != channels.end(); ++it)
+    foreach_channel(z, channels)
     {
-        ChannelAlias* c = *it;
-        if (!c || c->channel() == Chan_Invalid || m_channels.contains(c->channel()))
-            continue; // don't crash and ignore duplicates
-
-        m_channels += c->channel();
-        m_channel_aliases[c->channel()] = c;
-
-        if (c->channel() >= Chan_SpBits1 && c->channel() <= Chan_SpBitsLast)
-            ++m_num_spmask_chans;
-        if (c->channel() == Chan_DeepFlags && m_flags_channel == Chan_Invalid)
+        if      (z == Chan_SpBits1 && m_spmask_channel[0] == Dcx::Chan_Invalid)
+            m_spmask_channel[0] = Chan_SpBits1;
+        else if (z == Chan_SpBits2 && m_spmask_channel[1] == Dcx::Chan_Invalid)
+            m_spmask_channel[1] = Chan_SpBits2;
+        else if (z == Chan_DeepFlags && m_flags_channel == Chan_Invalid)
             m_flags_channel = Chan_DeepFlags;
     }
-}
-
-
-/*virtual*/
-DeepTile::~DeepTile ()
-{
-   //
 }
 
 

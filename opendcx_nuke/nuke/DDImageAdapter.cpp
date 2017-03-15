@@ -37,170 +37,145 @@
 
 
 #include "DDImageAdapter.h"
+#include <DDImage/Thread.h>  // for Lock
 
 #include <OpenDCX/DcxChannelContext.h>
 
 
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+
 //
 // Shared channel context for all Nuke plugins.
-// Assumes access is single-threaded (usually from _validate() calls)
 //
+// This is currently a global static because Nuke also has a global static list
+// of DD::Image::Channels and Layers. If Nuke switches to using a context
+// then this would change too.
+//
+// Be sure to lock before using methods that can create new channels
+// like Dcx::ChannelContext::getChannel().
+//
+
 static Dcx::ChannelContext dcx_channel_context;
 
 
 //
-// Maps from DD::Image::Channel to Dcx::ChannelIdx and Dcx::ChannelAlias:
+// Maps from DD::Image::Channel to Dcx::ChannelIdx
 //
-static std::map<DD::Image::Channel, Dcx::ChannelIdx> dcx_channel_map;
-static std::map<DD::Image::Channel, Dcx::ChannelAlias*> dcx_channelalias_map;
 
-//
-// Speed up repeated ChannelSet conversions by using a hash map:
-//
-static std::vector<Dcx::ChannelSet*>    dcx_channelset_list;
-static std::map<U64, Dcx::ChannelSet*>  dcx_channelset_map;
-
+static std::map<DD::Image::Channel, Dcx::ChannelIdx>    dcx_channel_map;
 
 
 //
-// Convert a DD::Image::ChannelSet to a Dcx::ChannelSet.
-//
-// This attempts to make the conversion more speedy by checking against previous
-// ChannelSet conversions stored in a map, the idea being that unique ChannelSet
-// combinations are relatively few.
-//
-// TODO: However, building the hash to test still requires the DD::Image::ChannelSet to
-// step through its channels appending to the hash, so in the end it may not be any
-// faster than just stepping through the channels in this method and using
-// dcx_channel_map lookups instead to build up the output Dcx::ChannelSet...
-// What's faster, a bunch of Hash append calls or a bunch of map lookups...?
+// Make sure channel set conversions in engine() are thread safe by
+// locking any writes to the static channel maps.
 //
 
-Dcx::ChannelSet
-dcxChannelSet (const DD::Image::ChannelSet& in)
+static DD::Image::Lock context_lock;
+
+
+
+//
+// Assign/get the DD::Image::Channels that are appropriate for OpenDCX.
+//
+// This calls DD::Image::getChannel() with 'sort=false' so that Nuke does
+// not reorder the channels in the 'spmask' layer - we always want the order
+// to be sp1, sp2, flags so that ChannelKnobs display correctly by default.
+//
+
+void
+dcxGetSpmaskChannels (DD::Image::Channel& sp1,
+                      DD::Image::Channel& sp2,
+                      DD::Image::Channel& flags)
 {
-#if 1
-    // Simpler version that uses just the channel->channel map:
-    Dcx::ChannelSet out;
-    foreach(z, in)
-    {
-        std::map<DD::Image::Channel, Dcx::ChannelIdx>::const_iterator it = dcx_channel_map.find(z);
-        if (it != dcx_channel_map.end())
-        {
-            out += it->second;
-            continue;
-        }
-        // Add new DD::Image::Channel by getting its full name - this
-        // may create a new Dcx::ChannelIdx.
-        //
-        // Explicity test for some deep channels that won't auto-translate
-        // to predefined Dcx::ChannelIdxs:
-        Dcx::ChannelIdx c = Dcx::Chan_Invalid;
-        if (z == DD::Image::Chan_DeepFront)
-            c = Dcx::Chan_ZFront;
-        else if (z == DD::Image::Chan_DeepBack)
-            c = Dcx::Chan_ZBack;
-        else
-            c = dcx_channel_context.getChannel(DD::Image::getName(z));
-        if (c != Dcx::Chan_Invalid)
-        {
-            out += c;
-            dcx_channel_map[z] = c;
-            // Also add it to the aliases map:
-            Dcx::ChannelAlias* alias = dcx_channel_context.findChannelAlias(c);
-            assert(alias); // shouldn't happen...
-            dcx_channelalias_map[z] = alias;
-            //std::cout << "ddchan=" << (int)z << "'" << z << "' -> dcxchan=" << c << "'" << dcx_channel_context.getChannelFullName(c) << "'" << std::endl;
-        }
-    }
-    return out;
-#else
-    // First check if set has already been converted:
-    DD::Image::Hash hash;
-    in.append(hash);
-    std::map<U64, Dcx::ChannelSet*>::const_iterator it = dcx_channelset_map.find(hash.value());
-    if (it != dcx_channelset_map.end())
-        return *it->second;
+    // Call getChannel() with sort=false to avoid Nuke reordering these channels
+    // in the layer:
+    sp1   = DD::Image::getChannel(Dcx::spMask8Channel1Name, false/*sort*/);
+    sp2   = DD::Image::getChannel(Dcx::spMask8Channel2Name, false/*sort*/);
+    flags = DD::Image::getChannel(Dcx::flagsChannelName,    false/*sort*/);
+}
 
-    // Not found, create a new set:
-    Dcx::ChannelSet* new_set = new Dcx::ChannelSet();
-    foreach(z, in)
-    {
-        const Dcx::ChannelIdx c = dcx_channel_context.getChannel(DD::Image::getName(z));
-        if (c != Dcx::Chan_Invalid)
-        {
-            *new_set += c;
-            dcx_channel_map[z] = c;
-            //std::cout << "ddchan=" << (int)z << "'" << z << "' -> dcxchan=" << c << "'" << dcx_channel_context.getChannelFullName(c) << "'" << std::endl;
-        }
-    }
-    dcx_channelset_list.push_back(new_set);
-    dcx_channelset_map[hash.value()] = new_set;
+// This should get called before any Op ctors so that the DCX channels are
+// constructed properly even if getChannels() is called from an Op with
+// sort=true:
+struct GetDcxChannels {
 
-    return *new_set;
-#endif
+    GetDcxChannels()
+    {
+        DD::Image::Channel sp1, sp2, flags;
+        dcxGetSpmaskChannels(sp1, sp2, flags);
+    }
+
+};
+static GetDcxChannels get_dcx_chans;
+
+
+//
+// Add new DD::Image::Channel by getting its full name and looking it
+// up in the Dcx::ChannelContext.
+// This may create a new Dcx::ChannelIdx.
+//
+
+Dcx::ChannelIdx
+dcxAddChannel (DD::Image::Channel z)
+{
+    Dcx::ChannelIdx c = Dcx::Chan_Invalid;
+
+    // Explicity test for some deep channels that won't auto-translate
+    // to predefined Dcx::ChannelIdxs:
+    if (z == DD::Image::Chan_DeepFront)
+        c = Dcx::Chan_ZFront;
+    else if (z == DD::Image::Chan_DeepBack)
+        c = Dcx::Chan_ZBack;
+    else
+    {
+        // Find the Dcx channel matching the full name of the DD::Image::Channel,
+        // or create it:
+        context_lock.lock();
+        c = dcx_channel_context.getChannel(DD::Image::getName(z));
+        dcx_channel_map[z] = c; // Remember new channel:
+        context_lock.unlock();
+    }
+    assert(c != Dcx::Chan_Invalid); // shouldn't happen...
+
+    //std::cout << "ddchan=" << (int)z << "'" << z << "' -> dcxchan=" << c << "'" << dcx_channel_context.getChannelFullName(c) << "'" << std::endl;
+    return c;
 }
 
 
-//
-// 
-//
-
-Dcx::ChannelAliasPtrSet
-dcxChannelAliasPtrSet (const DD::Image::ChannelSet& in)
-{
-    Dcx::ChannelAliasPtrSet out;
-    foreach(z, in)
-    {
-        std::map<DD::Image::Channel, Dcx::ChannelAlias*>::const_iterator it = dcx_channelalias_map.find(z);
-        if (it != dcx_channelalias_map.end())
-        {
-            assert(it->second); // shouldn't happen...
-            out.insert(it->second);
-            continue;
-        }
-        // Add new DD::Image::Channel by getting its full name - this
-        // may create a new Dcx::ChannelIdx.
-        //
-        // Explicity test for some deep channels that won't auto-translate
-        // to predefined Dcx::ChannelIdxs:
-        Dcx::ChannelIdx c = Dcx::Chan_Invalid;
-        if (z == DD::Image::Chan_DeepFront)
-            c = Dcx::Chan_ZFront;
-        else if (z == DD::Image::Chan_DeepBack)
-            c = Dcx::Chan_ZBack;
-        else
-            c = dcx_channel_context.getChannel(DD::Image::getName(z));
-        if (c != Dcx::Chan_Invalid)
-        {
-            dcx_channel_map[z] = c;
-            // Also add it to the aliases map:
-            Dcx::ChannelAlias* alias = dcx_channel_context.findChannelAlias(c);
-            assert(alias); // shouldn't happen...
-            dcx_channelalias_map[z] = alias;
-            out.insert(alias);
-            //std::cout << "ddchan=" << (int)z << "'" << z << "' -> dcxchan=" << c << "'" << dcx_channel_context.getChannelFullName(c) << "'" << std::endl;
-        }
-    }
-    return out;
-}
-
 
 //
-// 
+// Convert a DD::Image::Channel to a Dcx::ChannelIdx.
+// This may create a new Dcx::ChannelIdx.
 //
 
 Dcx::ChannelIdx
 dcxChannel (DD::Image::Channel z)
 {
     std::map<DD::Image::Channel, Dcx::ChannelIdx>::const_iterator it = dcx_channel_map.find(z);
-    if (it == dcx_channel_map.end())
-        return Dcx::Chan_Invalid;
-    return it->second;
+    if (it != dcx_channel_map.end())
+        return it->second;
+    return dcxAddChannel(z); // not found, add it now
 }
 
+
+//
+// Convert a DD::Image::ChannelSet to a Dcx::ChannelSet.
+//
+// This makes the conversion more speedy by checking against previous
+// Channel conversions stored in a map.
+//
+
+Dcx::ChannelSet
+dcxChannelSet (const DD::Image::ChannelSet& in)
+{
+    Dcx::ChannelSet out;
+    foreach(z, in)
+        out += dcxChannel(z);
+    return out;
+}
 
 
 Imath::M44f
@@ -224,8 +199,8 @@ dcxMatrix4ToM44f(const DD::Image::Matrix4& m)
 
 void
 dcxCopyDDImageDeepPixel (const DD::Image::DeepPixel& in,
-                         Dcx::SpMaskMode spmask_mode,
-                         const std::vector<DD::Image::Channel>& spmask_chan_list,
+                         const DD::Image::Channel spmask_channel0,
+                         const DD::Image::Channel spmask_channel1,
                          const DD::Image::Channel flags_channel,
                          Dcx::DeepPixel& out)
 {
@@ -233,19 +208,19 @@ dcxCopyDDImageDeepPixel (const DD::Image::DeepPixel& in,
     const unsigned nSamples = in.getSampleCount();
     if (nSamples == 0 || !in.channels().contains(DD::Image::Chan_DeepFront))
         return;
-    // Copy the samples from the source DD::Image::DeepPixel:
     out.reserve(nSamples);
 
     DD::Image::ChannelSet copy_channels(in.channels());
     copy_channels -= DD::Image::Mask_Deep;
     copy_channels -= DD::Image::Mask_Z;
-    for (unsigned i=0; i < spmask_chan_list.size(); ++i)
-        copy_channels -= spmask_chan_list[i];
+    copy_channels -= spmask_channel0;
+    copy_channels -= spmask_channel1;
     copy_channels -= flags_channel;
     out.setChannels(Dcx::dcxChannelSet(copy_channels));
 
     const bool have_Zb  = (in.channels().contains(DD::Image::Chan_DeepBack));
 
+    // Copy each samples from the source DD::Image::DeepPixel:
     float Zf, Zb;
     Dcx::DeepSegment ds;
     for (unsigned sample=0; sample < nSamples; ++sample)
@@ -269,7 +244,7 @@ dcxCopyDDImageDeepPixel (const DD::Image::DeepPixel& in,
         ds.index = sample;
 
         // Extract metadata from input channels:
-        dcxGetDeepSampleMetadata(in, sample, spmask_mode, spmask_chan_list, flags_channel, ds.metadata);
+        dcxGetDeepSampleMetadata(in, sample, spmask_channel0, spmask_channel1, flags_channel, ds.metadata);
 
         // Add segment and copy pixel data:
         const unsigned dsindex = out.append(ds);
@@ -292,8 +267,8 @@ dcxCopyDDImageDeepPixel (const DD::Image::DeepPixel& in,
 bool
 dcxCopyDDImageDeepSample (const DD::Image::DeepPixel& in,
                           unsigned sample,
-                          Dcx::SpMaskMode spmask_mode,
-                          const std::vector<DD::Image::Channel>& spmask_chan_list,
+                          const DD::Image::Channel spmask_channel0,
+                          const DD::Image::Channel spmask_channel1,
                           const DD::Image::Channel flags_channel,
                           Dcx::DeepSegment& segment_out,
                           Dcx::Pixelf* pixel_out)
@@ -319,7 +294,10 @@ dcxCopyDDImageDeepSample (const DD::Image::DeepPixel& in,
     segment_out.setDepths(Zf, Zb);
 
     // Extract metadata from input channels:
-    dcxGetDeepSampleMetadata(in, sample, spmask_mode, spmask_chan_list, flags_channel, segment_out.metadata);
+    dcxGetDeepSampleMetadata(in, sample,
+                             spmask_channel0, spmask_channel1,
+                             flags_channel,
+                             segment_out.metadata);
 
     // Copy the DD::Image::DeepPixel channel data into the Pixel:
     if (pixel_out)
@@ -327,8 +305,8 @@ dcxCopyDDImageDeepSample (const DD::Image::DeepPixel& in,
         DD::Image::ChannelSet copy_channels(in.channels());
         copy_channels -= DD::Image::Mask_Deep;
         copy_channels -= DD::Image::Mask_Z;
-        for (unsigned i=0; i < spmask_chan_list.size(); ++i)
-            copy_channels -= spmask_chan_list[i];
+        copy_channels -= spmask_channel0;
+        copy_channels -= spmask_channel1;
         copy_channels -= flags_channel;
         pixel_out->channels = dcxChannelSet(copy_channels);
         foreach(z, copy_channels)
@@ -340,68 +318,41 @@ dcxCopyDDImageDeepSample (const DD::Image::DeepPixel& in,
 
 
 //
-// Extract subpixel mask and flags metadata from input 'spmask' layer.
+// Extract subpixel mask and flags metadata from a DD::Image::DeepPixel sample.
 //
 
 void
 dcxGetDeepSampleMetadata (const DD::Image::DeepPixel& in,
                           unsigned sample,
-                          Dcx::SpMaskMode spmask_mode,
-                          const std::vector<DD::Image::Channel>& spmask_chan_list,
+                          const DD::Image::Channel spmask_channel0,
+                          const DD::Image::Channel spmask_channel1,
                           const DD::Image::Channel flags_channel,
                           Dcx::DeepMetadata& metadata_out)
 {
-    metadata_out.spmask = Dcx::SpMask8::zeroCoverage; // default to zero-coverage (legacy deep)
-    metadata_out.flags  = 0x0;
-
-    if (spmask_mode == Dcx::SPMASK_AUTO)
-    {
-        if (spmask_chan_list.size() == 2 &&
-            in.channels().contains(spmask_chan_list[0]) && in.channels().contains(spmask_chan_list[1]))
-        {
-           metadata_out.spmask.fromFloat(in.getUnorderedSample(sample, spmask_chan_list[0]),
-                                         in.getUnorderedSample(sample, spmask_chan_list[1]));
-
-        }
-        else if (spmask_chan_list.size() == 1 && in.channels().contains(spmask_chan_list[0]))
-        {
-            //metadata_out.spmask = Dcx::spMask4From1Float(in.getUnorderedSample(sample, spmask_chan_list[0]));
-
-        }
-        else
-        {
-            metadata_out.spmask = Dcx::SpMask8::zeroCoverage; // default to zero coverage (legacy data)
-        }
-
-    }
-    else if (spmask_mode == Dcx::SPMASK_8x8 && spmask_chan_list.size() == 2 &&
-             in.channels().contains(spmask_chan_list[0]) && in.channels().contains(spmask_chan_list[1]))
-    {
-        metadata_out.spmask.fromFloat(in.getUnorderedSample(sample, spmask_chan_list[0]),
-                                      in.getUnorderedSample(sample, spmask_chan_list[1]));
-
-    }
-    else if (spmask_mode == Dcx::SPMASK_4x4 && spmask_chan_list.size() == 1 &&
-             in.channels().contains(spmask_chan_list[0]))
-    {
-        //metadata_out.spmask = Dcx::spMask4From1Float(in.getUnorderedSample(sample, spmask_chan_list[0]));
-
-    }
+    if (spmask_channel0 != DD::Image::Chan_Black && in.channels().contains(spmask_channel0) &&
+        spmask_channel1 != DD::Image::Chan_Black && in.channels().contains(spmask_channel1))
+        metadata_out.spmask.fromFloat(in.getUnorderedSample(sample, spmask_channel0),
+                                      in.getUnorderedSample(sample, spmask_channel1));
+    else
+        metadata_out.spmask = Dcx::SpMask8::zeroCoverage; // default to zero-coverage (a legacy deep sample)
 
     // Extract flags from flags channel (convert from floating-point integer value):
-    if (in.channels().contains(flags_channel))
-        metadata_out.flags = (Dcx::DeepFlag)floorf(in.getUnorderedSample(sample, flags_channel));
+    if (flags_channel != DD::Image::Chan_Black && in.channels().contains(flags_channel))
+        metadata_out.flags.fromFloat(in.getUnorderedSample(sample, flags_channel));
+    else
+        metadata_out.flags.clearAll();
 }
 
 
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
+
 DDImageDeepPlane::DDImageDeepPlane (const DD::Image::Box& format,
                                     const DD::Image::Box& bbox,
                                     const DD::Image::ChannelSet& channels,
-                                    Dcx::SpMaskMode spmask_mode,
-                                    const std::vector<DD::Image::Channel>& spmask_chan_list,
+                                    const DD::Image::Channel spmask_channel0,
+                                    const DD::Image::Channel spmask_channel1,
                                     const DD::Image::Channel flags_channel,
                                     WriteAccessMode write_access_mode) :
     Dcx::DeepTile(Imath::Box2i(Imath::V2i(format.x(),   format.y()),
@@ -409,15 +360,14 @@ DDImageDeepPlane::DDImageDeepPlane (const DD::Image::Box& format,
                   Imath::Box2i(Imath::V2i(bbox.x(),   bbox.y()),
                                Imath::V2i(bbox.r()-1, bbox.t()-1))/*data_window*/,
                   true/*sourceWindowsYup*/,
-                  dcxChannelAliasPtrSet(channels),
+                  dcxChannelSet(channels),
                   dcx_channel_context,
                   write_access_mode,
                   true/*tileYup*/),
-    m_spmask_mode(spmask_mode),
-    m_spmask8_chan_list(spmask_chan_list),
     m_flags_channel(flags_channel)
 {
-    //
+    m_spmask_channel[0] = spmask_channel0;
+    m_spmask_channel[1] = spmask_channel1;
 }
 
 /*virtual*/
@@ -449,16 +399,16 @@ DDImageDeepPlane::getSampleMetadata (int x,
 
 //----------------------------------------------------------------------------------
 
+
 DDImageDeepInputPlane::DDImageDeepInputPlane (const DD::Image::Box& format,
                                               const DD::Image::DeepPlane* deep_in_plane,
-                                              Dcx::SpMaskMode spmask_mode,
-                                              const std::vector<DD::Image::Channel>& spmask_chan_list,
+                                              const DD::Image::Channel spmask_channel0,
+                                              const DD::Image::Channel spmask_channel1,
                                               const DD::Image::Channel flags_channel) :
     DDImageDeepPlane(format,
                      deep_in_plane->box(),
                      deep_in_plane->channels(),
-                     spmask_mode,
-                     spmask_chan_list,
+                     spmask_channel0, spmask_channel1,
                      flags_channel,
                      Dcx::DeepTile::WRITE_DISABLED),
     m_in_plane(deep_in_plane)
@@ -490,10 +440,10 @@ DDImageDeepInputPlane::getDeepPixel (int x,
                                      Dcx::DeepPixel& pixel) const
 {
     dcxCopyDDImageDeepPixel(m_in_plane->getPixel(y, x),
-                            m_spmask_mode,
-                            m_spmask8_chan_list,
+                            m_spmask_channel[0], m_spmask_channel[1],
                             m_flags_channel,
                             pixel);
+    pixel.setXY(x, y);
     return true;
 }
 
@@ -507,8 +457,7 @@ DDImageDeepInputPlane::getSampleMetadata (int x,
 {
     dcxGetDeepSampleMetadata(m_in_plane->getPixel(y, x),
                              sample,
-                             m_spmask_mode,
-                             m_spmask8_chan_list,
+                             m_spmask_channel[0], m_spmask_channel[1],
                              m_flags_channel,
                              metadata);
     return true;
@@ -520,14 +469,13 @@ DDImageDeepInputPlane::getSampleMetadata (int x,
 
 DDImageDeepOutputPlane::DDImageDeepOutputPlane (const DD::Image::Box& format,
                                                 DD::Image::DeepOutputPlane* deep_out_plane,
-                                                Dcx::SpMaskMode spmask_mode,
-                                                const std::vector<DD::Image::Channel>& spmask_chan_list,
+                                                const DD::Image::Channel spmask_channel0,
+                                                const DD::Image::Channel spmask_channel1,
                                                 const DD::Image::Channel flags_channel) :
     DDImageDeepPlane(format,
                      deep_out_plane->box(),
                      deep_out_plane->channels(),
-                     spmask_mode,
-                     spmask_chan_list,
+                     spmask_channel0, spmask_channel1,
                      flags_channel,
                      Dcx::DeepTile::WRITE_SEQUENTIAL),
     m_out_plane(deep_out_plane)
@@ -574,23 +522,19 @@ DDImageDeepOutputPlane::getSampleMetadata (int x,
 
 
 //
-// Writes a DeepPixel to a pixel-space location (x, y) in the DeepOutputPlane.
-// If xy is out of bounds or the image can't be written to, the deep pixel
-// is left empty and false is returned.
+// Writes a DeepPixel to a sequential pixel in the DeepOutputPlane.
+// Always returns true.
 //
 
-/*virtual*/
-bool
-DDImageDeepOutputPlane::setDeepPixel (int,/*x ignored*/
-                                      int,/*y ignored*/
-                                      const Dcx::DeepPixel& pixel)
+void
+DDImageDeepOutputPlane::setDeepPixelSequential (const Dcx::DeepPixel& pixel)
 {
     const size_t nSegments = pixel.size();
     assert(nSegments < 10000); // just in case...
     if (nSegments == 0)
     {
         m_out_plane->addHole();
-        return true;
+        return;
     }
 
     // Copy Dcx::DeepSegments:
@@ -619,19 +563,19 @@ DDImageDeepOutputPlane::setDeepPixel (int,/*x ignored*/
                 out_pixel.push_back(segment.Zb);
                 continue;
             }
-            else if (z == m_spmask8_chan_list[0])
+            else if (z == m_spmask_channel[0])
             {
                 out_pixel.push_back(sp1);
                 continue;
             }
-            else if (z == m_spmask8_chan_list[1])
+            else if (z == m_spmask_channel[1])
             {
                 out_pixel.push_back(sp2);
                 continue;
             }
             else if (z == m_flags_channel)
             {
-                out_pixel.push_back(float(segment.flags()));
+                out_pixel.push_back(segment.flags().toFloat());
                 continue;
             }
 
@@ -646,23 +590,17 @@ DDImageDeepOutputPlane::setDeepPixel (int,/*x ignored*/
     }
 
     m_out_plane->addPixel(out_pixel);
-
-    return true;
 }
 
 
 //
-// Writes an empty DeepPixel (0 samples) to the DeepOutputPlane.
-// Write access is sequential so both x/y args are ignored.
+// Writes an empty DeepPixel (0 samples) to a sequential pixel in the DeepOutputPlane.
 //
 
-/*virtual*/
-bool
-DDImageDeepOutputPlane::clearDeepPixel (int,/*x ignored*/
-                                        int /*y ignored*/)
+void
+DDImageDeepOutputPlane::clearDeepPixelSequential ()
 {
     m_out_plane->addHole();
-    return true;
 }
 
 

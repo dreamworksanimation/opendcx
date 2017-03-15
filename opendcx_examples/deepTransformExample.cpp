@@ -77,21 +77,25 @@ usageMessage (const char argv0[], bool verbose=false)
                 "provide fractional-pixel filtering while preserving the subpixel mask functionality.\n"
                 "\n"
                 "Mask resampling options:\n"
-                "  -f <mode>  resample mask mode ('nearest', 'box') (default=box)\n"
-                "  -ss <int>  mask super-sampling factor (default=4)\n"
+                "  -f <mode>                resample mask mode ('nearest', 'box') (default=box)\n"
+                "  -ss <int>                mask super-sampling factor (default=4)\n"
                 "\n"
                 "Transform options:\n"
-                "  -t <x> <y> translate            (default=0.0,0.0)\n"
-                "  -s <x> <y> scale                (default=1.0,1.0)\n"
-                "  -r <deg>   rotation in degrees  (default=0.0)\n"
-                "  -c <x> <y> rot/scale center     (default=0.0,0.0)\n"
+                "  -t <x> <y>               translate            (default=0.0,0.0)\n"
+                "  -s <x> <y>               scale                (default=1.0,1.0)\n"
+                "  -r <deg>                 rotation in degrees  (default=0.0)\n"
+                "  -c <x> <y>               rot/scale center     (default=0.0,0.0)\n"
+                "  -m <mode>                pixel-loop order 'bwd' or 'fwd' (default=bwd)\n"
+                "  -incrop  <x> <y> <r> <t> input crop region\n"
+                "  -outcrop <x> <y> <r> <t> output crop region\n"
                 "\n"
                 "Info options:\n"
-                "  -ininfo  <x> <y>  print input deep pixel info\n"
-                "  -outinfo <x> <y>  print output deep pixel info\n"
+                "  -ininfo  <x> <y>         print input deep pixel info\n"
+                "  -outinfo <x> <y>         print output deep pixel info\n"
                 "\n"
-                "  -v         print additional info\n"
-                "  -h         prints this message\n";
+                //"  -flat                    flatten output\n"
+                "  -v                       print additional info\n"
+                "  -h                       prints this message\n";
 
          std::cerr << std::endl;
     }
@@ -105,7 +109,7 @@ main (int argc, char *argv[])
     const char* inFile = 0;
     const char* outFile = 0;
 
-    int   superSampling = 4;
+    Dcx::DeepTransform::SuperSamplingMode superSampling = Dcx::DeepTransform::SS_RATE_4;
     Dcx::DeepTransform::FilterMode filterMode = Dcx::DeepTransform::FILTER_BOX;
     float translateX = 0.0f;
     float translateY = 0.0f;
@@ -114,10 +118,14 @@ main (int argc, char *argv[])
     float rotateZ    = 0.0f;
     float centerX    = -INFINITYf; // calc center from image
     float centerY    = -INFINITYf;
+    int   incrop[4];   incrop[0] =  incrop[1] = 100000;  incrop[2] =  incrop[3] = -100000;
+    int   outcrop[4]; outcrop[0] = outcrop[1] = 100000; outcrop[2] = outcrop[3] = -100000;
+    int   loopOrder  = 0; // backwards
     int   infoInX    = -100000;
     int   infoInY    = -100000;
     int   infoOutX   = -100000;
     int   infoOutY   = -100000;
+    //bool  flatten    = false;
     //
     bool  verbose = false;
 
@@ -136,7 +144,7 @@ main (int argc, char *argv[])
             // Subpixel mask resample mode:
             if (i > argc - 2)
                 usageMessage(argv[0]);
-            superSampling = (int)floor(strtol(argv[i + 1], 0, 0));
+            superSampling = (Dcx::DeepTransform::SuperSamplingMode)int(floor(strtod(argv[i + 1], NULL)));
             i += 2;
         }
         if (!strcmp(argv[i], "-f"))
@@ -155,8 +163,8 @@ main (int argc, char *argv[])
             // xy translation:
             if (i > argc - 3)
                 usageMessage(argv[0]);
-            translateX = strtol(argv[i + 1], 0, 0);
-            translateY = strtol(argv[i + 2], 0, 0);
+            translateX = strtod(argv[i + 1], NULL);
+            translateY = strtod(argv[i + 2], NULL);
             i += 3;
         }
         else if (!strcmp(argv[i], "-s"))
@@ -164,8 +172,8 @@ main (int argc, char *argv[])
             // xy scale:
             if (i > argc - 3)
                 usageMessage(argv[0]);
-            scaleX = strtol(argv[i + 1], 0, 0);
-            scaleY = strtol(argv[i + 2], 0, 0);
+            scaleX = strtod(argv[i + 1], NULL);
+            scaleY = strtod(argv[i + 2], NULL);
             i += 3;
         }
         else if (!strcmp(argv[i], "-r"))
@@ -173,7 +181,7 @@ main (int argc, char *argv[])
             // z rotation:
             if (i > argc - 2)
                 usageMessage(argv[0]);
-            rotateZ = strtol(argv[i + 1], 0, 0);
+            rotateZ = strtod(argv[i + 1], NULL);
             i += 2;
         }
         else if (!strcmp(argv[i], "-c"))
@@ -181,17 +189,48 @@ main (int argc, char *argv[])
             // rot/scale xy center:
             if (i > argc - 3)
                 usageMessage(argv[0]);
-            centerX = strtol(argv[i + 1], 0, 0);
-            centerY = strtol(argv[i + 2], 0, 0);
+            centerX = strtod(argv[i + 1], NULL);
+            centerY = strtod(argv[i + 2], NULL);
             i += 3;
+        }
+        else if (!strcmp(argv[i], "-m"))
+        {
+            // Pixel-loop order mode:
+            if (i > argc - 2)
+                usageMessage(argv[0]);
+            if (strcmp(argv[i + 1], "fwd")==0)
+                loopOrder = 1;
+            i += 2;
+        }
+        else if (!strcmp(argv[i], "-incrop"))
+        {
+            // input crop region:
+            if (i > argc - 5)
+                usageMessage(argv[0]);
+            incrop[0] = (int)strtol(argv[i + 1], 0, 0);
+            incrop[1] = (int)strtol(argv[i + 2], 0, 0);
+            incrop[2] = (int)strtol(argv[i + 3], 0, 0);
+            incrop[3] = (int)strtol(argv[i + 4], 0, 0);
+            i += 5;
+        }
+        else if (!strcmp(argv[i], "-outcrop"))
+        {
+            // Output crop region:
+            if (i > argc - 5)
+                usageMessage(argv[0]);
+            outcrop[0] = (int)strtol(argv[i + 1], 0, 0);
+            outcrop[1] = (int)strtol(argv[i + 2], 0, 0);
+            outcrop[2] = (int)strtol(argv[i + 3], 0, 0);
+            outcrop[3] = (int)strtol(argv[i + 4], 0, 0);
+            i += 5;
         }
         else if (!strcmp(argv[i], "-info") || !strcmp(argv[i], "-outinfo"))
         {
             // print info for deep pixel xy:
             if (i > argc - 3)
                 usageMessage(argv[0]);
-            infoOutX = (int)floor(strtol(argv[i + 1], 0, 0));
-            infoOutY = (int)floor(strtol(argv[i + 2], 0, 0));
+            infoOutX = (int)strtol(argv[i + 1], 0, 0);
+            infoOutY = (int)strtol(argv[i + 2], 0, 0);
             i += 3;
         }
         else if (!strcmp(argv[i], "-ininfo"))
@@ -199,10 +238,18 @@ main (int argc, char *argv[])
             // print info for deep pixel xy:
             if (i > argc - 3)
                 usageMessage(argv[0]);
-            infoInX = (int)floor(strtol(argv[i + 1], 0, 0));
-            infoInY = (int)floor(strtol(argv[i + 2], 0, 0));
+            infoInX = (int)strtol(argv[i + 1], 0, 0);
+            infoInY = (int)strtol(argv[i + 2], 0, 0);
             i += 3;
         }
+        //else if (!strcmp(argv[i], "-flat"))
+        //{
+        //    // Flatten output:
+        //    if (i > argc - 1)
+        //        usageMessage(argv[0]);
+        //    flatten = true;
+        //    i += 1;
+        //}
         else if (!strcmp(argv[i], "-v"))
         {
             // Verbose mode:
@@ -241,23 +288,29 @@ main (int argc, char *argv[])
 
     try
     {
-        Imf::Header inHeader; // for access to displayWindow...
-        Imf::DeepImage inDeepImage;
-        Imf::loadDeepScanLineImage(std::string(inFile), inHeader, inDeepImage);
+        OPENEXR_IMF_NAMESPACE::Header inHeader; // for access to displayWindow...
+        OPENEXR_IMF_NAMESPACE::DeepImage inDeepImage;
+        OPENEXR_IMF_NAMESPACE::loadDeepScanLineImage(std::string(inFile), inHeader, inDeepImage);
 
         // Dcx::DeepTile stores the ChannelSet along with the channel ptrs:
         Dcx::DeepImageInputTile inDeepTile(inHeader, inDeepImage, chanCtx, true/*Yup*/);
 
-        if (verbose)
+        IMATH_NAMESPACE::Box2i in_bbox = inDeepTile.dataWindow();
+        if (incrop[0] <= incrop[2] && incrop[1] <= incrop[3])
         {
-            std::cout << "reading file '" << inFile << "'" << std::endl;
-            std::cout << "  in bbox" << inDeepTile.dataWindow() << std::endl;
-            inDeepTile.channels().print("  in channels=", std::cout, &chanCtx); std::cout << std::endl;
+            in_bbox.min.x = std::max(in_bbox.min.x, incrop[0]);
+            in_bbox.min.y = std::max(in_bbox.min.y, incrop[1]);
+            in_bbox.max.x = std::max(in_bbox.min.x, std::min(incrop[2], in_bbox.max.x));
+            in_bbox.max.y = std::max(in_bbox.min.y, std::min(incrop[3], in_bbox.max.y));
         }
 
-        // Output tile is copy of in tile:
-        Dcx::DeepImageOutputTile outDeepTile(inDeepTile);
-        outDeepTile.setOutputFile(outFile, Imf::INCREASING_Y/*lineOrder*/);
+        if (verbose)
+        {
+            std::cout << "reading file '" << inFile << std::endl;
+            std::cout << "  in bbox" << in_bbox;
+            inDeepTile.channels().print(", in channels=", std::cout, &chanCtx);
+            std::cout << std::endl;
+        }
 
         if (centerX <= -INFINITYf)
         {
@@ -272,47 +325,104 @@ main (int argc, char *argv[])
         xform.translate(-centerX, -centerY);
         xform.translate(translateX, translateY);
 
+        IMATH_NAMESPACE::Box2i out_bbox = xform.transform(in_bbox, 0/*clamp_to*/);
+        if (outcrop[0] <= outcrop[2] && outcrop[1] <= outcrop[3])
+        {
+            out_bbox.min.x = std::max(out_bbox.min.x, outcrop[0]);
+            out_bbox.min.y = std::max(out_bbox.min.y, outcrop[1]);
+            out_bbox.max.x = std::max(out_bbox.min.x, std::min(outcrop[2], out_bbox.max.x));
+            out_bbox.max.y = std::max(out_bbox.min.y, std::min(outcrop[3], out_bbox.max.y));
+        }
+        // Pad output bbox by one pixel:
+        const int pad = 1;//(black_outside)?1:0;
+        out_bbox.min.x -= pad; out_bbox.min.y -= pad;
+        out_bbox.max.x += pad; out_bbox.max.y += pad;
+
+        Dcx::ChannelSet out_channels = inDeepTile.channels();
+        out_channels += Dcx::Mask_DeepMetadata;
+
+        // DeepTransform will add spmask/flags channels so make sure we're writing them:
+        Dcx::DeepImageOutputTile outDeepTile(inDeepTile, out_bbox, true/*Yup*/);
+        outDeepTile.setChannels(out_channels);
+        outDeepTile.setOutputFile(outFile, OPENEXR_IMF_NAMESPACE::INCREASING_Y/*lineOrder*/);
+        if (verbose) {
+            std::cout << "  transform:" << std::endl << std::fixed << xform.matrix();
+            std::cout << "  out file '" << outFile << std::endl;
+            std::cout << "  out_bbox" << out_bbox;
+            outDeepTile.channels().print(", out channels=", std::cout, &chanCtx);
+            std::cout << std::endl;
+        }
+
         Dcx::ChannelSet xform_channels = inDeepTile.channels();
 
         // This DeepPixel get reused:
         Dcx::DeepPixel deepPixel(xform_channels);
 
-        if (inDeepTile.isActivePixel(infoInX, infoInY))
+        if (loopOrder == 1)
         {
-            std::cout << "in[" << infoInX << ", " << infoInY << "]";
-            inDeepTile.getDeepPixel(infoInX, infoInY, deepPixel);
-            deepPixel.printInfo(std::cout, "=");
-        }
-
-        Imath::Box2i out_bbox = xform.transform(inDeepTile.dataWindow(), 0/*&in_bbox*//*clamp_to*/);
-        if (verbose)
-            std::cout << "out_bbox" << out_bbox << std::endl;
-
-        for (int outY=out_bbox.min.y; outY <= out_bbox.max.y; ++outY)
-        {
-            for (int outX=out_bbox.min.x; outX <= out_bbox.max.x; ++outX)
+            // Do forward-transform which is less efficient as the entire
+            // output tile must be kept cached until all input pixels are
+            // finished:
+            if (verbose)
+                std::cout << "    DO FORWARD-TRANSFORM LOOP" << std::endl;
+            for (int inY=in_bbox.min.y; inY <= in_bbox.max.y; ++inY)
             {
-                // Sample the output deep pixel from the input tile:
-                xform.sample(outX, outY, inDeepTile, deepPixel);
-
-                if (outX==infoOutX && outY==infoOutY)
+                for (int inX=in_bbox.min.x; inX <= in_bbox.max.x; ++inX)
                 {
-                    std::cout << "out[" << infoOutX << ", " << infoOutY << "]";
-                    deepPixel.printInfo(std::cout, "=");
+
+                    // Transform the input deep pixel to the output tile:
+                    xform.transformPixel(inDeepTile, inX, inY, outDeepTile);
+
+                    if (inX==infoInX && inY==infoInY)
+                    {
+                        std::cout << "in[" << infoOutX << ", " << infoOutY << "]";
+                        deepPixel.printInfo(std::cout, "=");
+                    }
+
                 }
+            }
+            outDeepTile.writeTile(true/*flush*/);
 
-                // Save deep pixel in output tile:
-                outDeepTile.setDeepPixel(outX, outY, deepPixel);
-
+        }
+        else
+        {
+            // Do reverse-transform which is more memory-efficient as each output
+            // scanline can be flushed as it's completed:
+            if (verbose)
+                std::cout << "    DO BACKWARDS-TRANSFORM LOOP" << std::endl;
+            if (inDeepTile.isActivePixel(infoInX, infoInY))
+            {
+                std::cout << "in[" << infoInX << ", " << infoInY << "]";
+                inDeepTile.getDeepPixel(infoInX, infoInY, deepPixel);
+                deepPixel.printInfo(std::cout, "=");
             }
 
-            outDeepTile.writeScanline(outY, true/*flush*/);
+            for (int outY=out_bbox.min.y; outY <= out_bbox.max.y; ++outY)
+            {
+                for (int outX=out_bbox.min.x; outX <= out_bbox.max.x; ++outX)
+                {
+                    // Sample the output deep pixel from the input tile:
+                    xform.sample(outX, outY, inDeepTile, xform_channels, deepPixel);
+
+                    if (outX==infoOutX && outY==infoOutY)
+                    {
+                        std::cout << "out[" << infoOutX << ", " << infoOutY << "]";
+                        deepPixel.printInfo(std::cout, "=");
+                    }
+
+                    // Save deep pixel in output tile:
+                    outDeepTile.setDeepPixel(outX, outY, deepPixel);
+
+                }
+                outDeepTile.writeScanline(outY, true/*flush*/);
+            }
+
         }
 
         // If all lines are flushed on write the tile should be using zero bytes
         // by end:
         if (verbose)
-            std::cout << "  out_tile bytes=" << outDeepTile.bytesUsed() << std::endl;
+            std::cout << "  out_tile bytes remaining (should be 0)=" << outDeepTile.bytesUsed() << std::endl;
 
     }
     catch (const std::exception &e)

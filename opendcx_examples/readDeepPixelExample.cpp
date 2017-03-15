@@ -178,9 +178,9 @@ main (int argc, char *argv[])
         }
 
         // Print an entire line's worth:
-        if (infoX == -100000 && infoY >= inDeepTile.y() && infoY <= inDeepTile.t()) {
+        if (infoX == -100000 && infoY >= inDeepTile.minY() && infoY <= inDeepTile.maxY()) {
             // Loop example going through entire input tile:
-            for (infoX=inDeepTile.x(); infoX <= inDeepTile.r(); ++infoX)
+            for (infoX=inDeepTile.minX(); infoX <= inDeepTile.maxX(); ++infoX)
             {
                 std::cout << "-----------------------------------------------------------------------------" << std::endl;
                 inDeepTile.getDeepPixel(infoX, infoY, deepPixel);

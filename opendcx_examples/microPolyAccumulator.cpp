@@ -85,7 +85,7 @@ microPolyAccumulator::FragmentCluster::composite (Dcx::Pixelf& result,
 
                 // Composite AOVs with combined alpha (skipping rgb & alphas):
                 foreach_channel(z, fragChannelsNoRgbNoAlphas)
-                    result[*z] += fragColor[*z] * invAvgA;
+                    result[z] += fragColor[z] * invAvgA;
 
                 // Composite RGB with separate alphas:
                 result[Chan_R] += fragColor[Chan_R] * (1.0f - alphas[0]);

@@ -38,14 +38,15 @@
 #ifndef INCLUDED_DCX_DEEPIMAGETILE_H
 #define INCLUDED_DCX_DEEPIMAGETILE_H
 
-//-----------------------------------------------------------------------------
+//=============================================================================
 //
 //  class  DeepImageInputTile
 //  class  DeepImageOutputTile
 //
-//-----------------------------------------------------------------------------
+//=============================================================================
 
 #include "DcxDeepTile.h"
+#include "DcxImageFormat.h"
 
 #ifdef __ICC
 // disable icc remark #1572: 'floating-point equality and inequality comparisons are unreliable'
@@ -60,23 +61,46 @@
 #  include <assert.h>
 #endif
 
+
+//-----------------
+//!rst:cpp:begin::
+//DeepImageTile
+//=============
+//-----------------
+
+
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
+
+//------------------------------
+//!rst:left-align::
+//.. _deepimageinputtile_class:
+//
+//DeepImageInputTile
+//==================
+//------------------------------
+
+//=============================
+//
+//  class DeepImageInputTile
+// 
+//=============================
 //-----------------------------------------------------------------------------
 //
-// class DeepImageInputTile
+//  Adapter class for an input DeepImage tile.
 //
-//      Adapter class for an input DeepImage tile.
+//  Contains an array of TypedDeepImageChannel pointers, one for
+//  each ChannelIdx entry.  Unassigned channels are left NULL.
 //
-//      Contains an array of TypedDeepImageChannel pointers, one for
-//      each ChannelIdx entry.  Unassigned channels are left NULL.
-//
-//      TODO: support multiple DeepImages/Headers so that multiple Parts
-//      can be combined into a single DeepPixel.
+//  TODO: Disconnect this from DeepImageLevel and DeepImageChannel so
+//        we can better manage the deep IO.
+//  TODO: support multiple DeepImages/Headers so that multiple Parts
+//        can be combined into a single DeepPixel.
 //
 //-----------------------------------------------------------------------------
 
-class DCX_EXPORT DeepImageInputTile : public DeepTile
+class DCX_EXPORT DeepImageInputTile : public DeepTile, public ImageFormat
+    //, public MetadataOp
 {
   public:
 
@@ -85,28 +109,33 @@ class DCX_EXPORT DeepImageInputTile : public DeepTile
     //
 
     DeepImageInputTile (ChannelContext& channel_ctx,
-                        bool tileYup=true);
+                        bool yAxisUp=true);
 
     //
     // Constructs from a DeepImage (level 0) - assumes the
     // displayWindow == dataWindow.
     //
 
-    DeepImageInputTile (const OPENEXR_IMF_NAMESPACE::DeepImage& image,
+    DeepImageInputTile (const OPENEXR_IMF_NAMESPACE::DeepImage& imfDeepImage,
                         ChannelContext& channel_ctx,
-                        bool tileYup=true);
+                        bool yAxisUp=true);
 
     //
-    // Constructs from a DeepImage (level 0) and copies the displayWindow from
-    // the separate Header.
-    //
-    // (TODO: this is awkward - DeepImage class should contain displayWindow!)
+    // Constructs from a DeepImage (level 0) and copies the displayWindow and
+    // other format attributes from the separate Header.
     //
 
-    DeepImageInputTile (const OPENEXR_IMF_NAMESPACE::Header& header,
-                        const OPENEXR_IMF_NAMESPACE::DeepImage& image,
+    DeepImageInputTile (const OPENEXR_IMF_NAMESPACE::Header&,
+                        const OPENEXR_IMF_NAMESPACE::DeepImage& imfDeepImage,
                         ChannelContext& channel_ctx,
-                        bool tileYup=true);
+                        bool yAxisUp=true);
+
+
+    //
+    // Return the ImageFormat object
+    //
+
+    /*virtual*/ ImageFormat* format ();
 
 
     //
@@ -156,27 +185,39 @@ class DCX_EXPORT DeepImageInputTile : public DeepTile
 
   protected:
 
-    const OPENEXR_IMF_NAMESPACE::DeepImageLevel* m_image_level;         // The image level
-    std::vector<const OPENEXR_IMF_NAMESPACE::DeepImageChannel*> m_chan_ptrs;  // Per-ChannelIdx channel data ptrs
+    const OPENEXR_IMF_NAMESPACE::DeepImageLevel*                m_image_level;  // The image level
+    std::vector<const OPENEXR_IMF_NAMESPACE::DeepImageChannel*> m_chan_ptrs;    // Per-ChannelIdx channel data ptrs
 
 };
 
 
+//------------------------------
+//!rst:left-align::
+//.. _deepimageoutputtile_class:
+//
+//DeepImageOutputTile
+//===================
+//------------------------------
 
+//==============================
+//
+//  class DeepImageOutputTile
+// 
+//==============================
 //-----------------------------------------------------------------------------
 //
-// class DeepImageOutputTile
-//
-//      Adapter class for an output DeepImage tile.
+//  Adapter class for an output DeepImage tile.
 //
 //
-//      TODO: support multiple DeepImages/Headers so that multiple Parts
-//      can be combined into a single DeepPixel.
+//  TODO: Disconnect this from DeepScanLineOutputFile so we can better
+//        manage the deep IO.
+//  TODO: support multiple DeepImages/Headers so that multiple Parts
+//        can be combined into a single DeepPixel.
 //
 //-----------------------------------------------------------------------------
 
 
-class DCX_EXPORT DeepImageOutputTile : public DeepTile
+class DCX_EXPORT DeepImageOutputTile : public DeepTile, public ImageFormat
 {
   public:
 
@@ -215,17 +256,63 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
     DeepImageOutputTile (const IMATH_NAMESPACE::Box2i& display_window,
                          const IMATH_NAMESPACE::Box2i& data_window,
                          bool sourceWindowsYup,
-                         const ChannelAliasPtrSet& channels,
+                         const ChannelSet& channels,
                          ChannelContext& channel_ctx,
-                         bool tileYup=true);
+                         bool yAxisUp=true);
+
+    //
+    // Copy resolution and channel info from another DeepTile with
+    // a new data window to override it.
+    // No pixel data is copied.
+    //
+
+    DeepImageOutputTile (const DeepImageInputTile& tile,
+                         const IMATH_NAMESPACE::Box2i& data_window,
+                         bool sourceWindowYup);
+
+    DeepImageOutputTile (const ImageFormat& format,
+                         const DeepTile& tile,
+                         const IMATH_NAMESPACE::Box2i& data_window,
+                         bool sourceWindowYup);
 
     //
     // Copy resolution and channel info from another DeepTile.
     // No pixel data is copied.
     //
 
-    DeepImageOutputTile (const DeepTile& tile);
+    DeepImageOutputTile (const DeepImageInputTile& tile);
+
+    DeepImageOutputTile (const ImageFormat& format,
+                         const DeepTile& tile);
+
+    //
     ~DeepImageOutputTile ();
+
+
+    //
+    // Return the ImageFormat object
+    //
+
+    /*virtual*/ ImageFormat* format ();
+
+
+    //
+    // Change the set of channels.
+    // Possibly destructive! All existing deep data will be deleted
+    // if the new channel set is different than the current one.
+    //
+
+    /*virtual*/ void    setChannels (const Dcx::ChannelSet&);
+
+
+    //
+    // Change the active data window.
+    // Destructive! All existing deep data will be deleted if the new
+    // dataWindow is different than the current one.
+    //
+
+    /*virtual*/ void    setDataWindow (const IMATH_NAMESPACE::Box2i& data_window,
+                                       bool sourceWindowYAxisUp=true);
 
 
     size_t      bytesUsed () const;
@@ -308,7 +395,6 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
   protected:
 
     void        deleteDeepLines ();
-    void        resizeDataWindow (const IMATH_NAMESPACE::Box2i& data_window);
     DeepLine*   createDeepLine (int y);
 
 
@@ -320,12 +406,17 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile
 
 
 
+//--------------
+//!rst:cpp:end::
+//--------------
+
 //-----------------
 // Inline Functions
 //-----------------
 
-inline
-DeepImageInputTile::DeepImageInputTile (const DeepTile& b) : DeepTile(b) {}
+/*virtual*/ inline ImageFormat* DeepImageInputTile::format () { return this; }
+/*virtual*/ inline ImageFormat* DeepImageOutputTile::format () { return this; }
+//-------------------------------------------------------
 inline
 float DeepImageInputTile::getChannelSampleValueAt (int x,
                                                    int y,
@@ -334,8 +425,8 @@ float DeepImageInputTile::getChannelSampleValueAt (int x,
 #ifdef DEBUG
     assert(c);
 #endif
-    if (m_tile_yUp)
-        y = m_display_window.max.y - y;
+    if (yAxisUp())
+        y = m_top_reference - y;
     switch (c->pixelType())
     {
         case OPENEXR_IMF_NAMESPACE::HALF:
@@ -353,11 +444,11 @@ float DeepImageInputTile::getChannelSampleValueAt (int x,
     }
     return 0.0f;
 }
-//-----------------
+//-------------------------------------------------------
 inline
 DeepImageOutputTile::DeepLine* DeepImageOutputTile::getLine(int y) const {
-    return (y < m_data_window.min.y || y > m_data_window.max.y)?0:m_deep_lines[y - m_data_window.min.y]; }
-//-----------------
+    return (y < m_dataWindow.min.y || y > m_dataWindow.max.y)?0:m_deep_lines[y - m_dataWindow.min.y]; }
+//-------------------------------------------------------
 inline
 uint32_t
 DeepImageOutputTile::DeepLine::floatOffset (uint32_t xoffset) const

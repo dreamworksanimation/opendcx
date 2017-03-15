@@ -38,20 +38,27 @@
 #ifndef INCLUDED_DCX_CHANNELCONTEXT_H
 #define INCLUDED_DCX_CHANNELCONTEXT_H
 
-//-----------------------------------------------------------------------------
+//=============================================================================
 //
 //  class    ChannelContext
 //
-//-----------------------------------------------------------------------------
+//=============================================================================
 
 #include "DcxChannelAlias.h"
 
 
+//-------------------------
+//!rst:cpp:begin::
+//.. _channelcontext_class:
+//
+//ChannelContext
+//==============
+//-------------------------
+
+
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
-//---------------------------------------------------------------------------
-//---------------------------------------------------------------------------
-
+//-------------------------------------------------------------------
 //
 // Split the name into separate layer & chan strings, if possible,
 // returning true if successful.
@@ -59,6 +66,7 @@ OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 // name contains more than one period then those become part of the
 // layer string.
 //
+//-------------------------------------------------------------------
 
 DCX_EXPORT
 void    splitName (const char* name,
@@ -66,12 +74,14 @@ void    splitName (const char* name,
                    std::string& chan);
 
 
+//-------------------------------------------------------------------
 //
 // Returns the best matching standard ChannelIdx and layer name for
 // the channel name (with no layer prefix,) or false if no match.
 // If there's a match it also sets the channel's default name and
 // PixelType for file I/O.
 //
+//-------------------------------------------------------------------
 
 DCX_EXPORT
 bool    matchStandardChannel (const char* channel_name,
@@ -82,27 +92,33 @@ bool    matchStandardChannel (const char* channel_name,
                               OPENEXR_IMF_NAMESPACE::PixelType& std_io_type);
 
 
+//--------------------------------------------------------------
 //
 // If the kind of channel is one of the predefined ones, return
 // the common position that channel occupies in a layer.
-// i.e.
-//      if kind==Chan_R -> rgba position 0
-//      if kind==Chan_A -> rgba position 3
+// i.e::
 //
+//     if kind==Chan_R -> rgba position 0
+//     if kind==Chan_A -> rgba position 3
+//
+//--------------------------------------------------------------
 
 DCX_EXPORT
 int     getLayerPositionFromKind (ChannelIdx kind);
 
 
-//---------------------------------------------------------------------------
-//
+//============================
 //
 //  class ChannelContext
+// 
+//============================
+//---------------------------------------------------------------------------
 //
-//      Context structure for storing the global ChannelIdx assignment slots
-//      and maps for quick access to/from ChannelAliases and ChannelIdxs.
+//  Context structure for storing the global ChannelIdx assignment slots
+//  and maps for quick access to/from ChannelAliases and ChannelIdxs.
 //
-//      
+//  A :ref:`channelalias_class` contains layer and channel strings which map
+//  to unique :ref:`channelidx_type` indice.
 //
 //---------------------------------------------------------------------------
 
@@ -113,7 +129,7 @@ class DCX_EXPORT ChannelContext
     struct ChanOrder
     {
         ChannelIdx  channel;    // ChannelIdx
-        uint32_t    order;      // Order in layer (TODO)
+        uint32_t    order;      // Order in layer (TODO: not implemented - required anymore?)
     };
 
     struct Layer
@@ -143,6 +159,21 @@ class DCX_EXPORT ChannelContext
     ChannelContext(bool addStandardChans=true);
 
     virtual ~ChannelContext();
+
+
+    //----------------------------------------------------
+    // Get the ChannelSet for all channels in the context.
+    //----------------------------------------------------
+
+    ChannelSet getChannels ();
+
+
+    //---------------------------------------------------------------
+    // Get the ChannelSet from a ChannelAliasList or ChannelAliasSet.
+    //---------------------------------------------------------------
+
+    ChannelSet getChannelSetFromAliases (const ChannelAliasPtrList&);
+    ChannelSet getChannelSetFromAliases (const ChannelAliasPtrSet&);
 
 
     //---------------------------------------------------------------
@@ -230,25 +261,26 @@ class DCX_EXPORT ChannelContext
     // being requested so the next available ChannelIdx is assigned, incrementing
     // lastAssignedChannel().
     //
-    //  chan_name   user-facing name, not including the layer ('R', 'G', 'red',
-    //              'green', 'alpha', 'Z', 'ZBack', etc)
-    //  layer_name  user-facing layer name ('rgba', 'beauty', 'beauty.diffuse')
-    //  channel     absolute ChannelIdx - if Chan_Invalid a new ChannelIdx is assinged
-    //  position    sorted position index within layer (i.e. 0,1,2)
-    //  io_name     name to use for exr file I/O ('R' or 'AR'  vs. 'rgba.red' or
-    //              'opacity.R')
-    //  io_type     PixelType to use for file I/O
+    // * chan_name   user-facing name, not including the layer ('R', 'G', 'red',
+    //               'green', 'alpha', 'Z', 'ZBack', etc)
+    // * layer_name  user-facing layer name ('rgba', 'beauty', 'beauty.diffuse')
+    // * channel     absolute ChannelIdx - if Chan_Invalid a new ChannelIdx is assigned
+    // * position    sorted position index within layer (i.e. 0,1,2)
+    // * io_name     name to use for exr file I/O ('R' or 'AR'  vs. 'rgba.red' or
+    //               'opacity.R')
+    // * io_type     PixelType to use for file I/O
     //
     //--------------------------------------------------------------------------------
 
     ChannelAlias*   addChannelAlias (ChannelAlias* alias);
 
-    ChannelAlias*   addChannelAlias (const std::string& chan_name,
-                                     const std::string& layer_name,
-                                     ChannelIdx         channel,
-                                     uint32_t           position,
-                                     const std::string& io_name,
-                                     OPENEXR_IMF_NAMESPACE::PixelType io_type);
+    ChannelAlias*   addChannelAlias (const std::string&                 chan_name,
+                                     const std::string&                 layer_name,
+                                     ChannelIdx                         channel,
+                                     uint32_t                           position,
+                                     const std::string&                 io_name,
+                                     OPENEXR_IMF_NAMESPACE::PixelType   io_type,
+                                     int                                io_part=0);
 
 
     //---------------------------------------------
@@ -259,7 +291,7 @@ class DCX_EXPORT ChannelContext
 
     const ChannelAliasPtrList&  channelAliasList () const;
     const AliasNameToListMap&   channelNameToAliasListMap () const;
-    const ChannelIdxToListMap&  channelaliasToChannelMap () const;
+    const ChannelIdxToListMap&  channelAliasToChannelMap () const;
 
 
     //---------------------------------------------------------------
@@ -287,6 +319,10 @@ class DCX_EXPORT ChannelContext
 
 
 
+//--------------
+//!rst:cpp:end::
+//--------------
+
 //-----------------
 // Inline Functions
 //-----------------
@@ -308,7 +344,7 @@ ChannelContext::channelAliasList () const { return m_channelalias_list; }
 inline const ChannelContext::AliasNameToListMap&
 ChannelContext::channelNameToAliasListMap () const { return m_channelalias_name_map; }
 inline const ChannelContext::ChannelIdxToListMap&
-ChannelContext::channelaliasToChannelMap () const { return m_channelalias_channel_map; }
+ChannelContext::channelAliasToChannelMap () const { return m_channelalias_channel_map; }
 //----------------
 inline void
 ChannelContext::printChannelName (std::ostream& os, const ChannelIdx& channel) const { os << getChannelName(channel); }
