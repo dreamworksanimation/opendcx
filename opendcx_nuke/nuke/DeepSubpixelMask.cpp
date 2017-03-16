@@ -461,3 +461,9 @@ public:
 
 static Op* build(Node* node) { return new DeepSubpixelMask(node); }
 const Op::Description DeepSubpixelMask::description("DeepSubpixelMask", "Deep/DeepSubpixelMask", build);
+
+// end of DeepSubpixelMask.cpp
+
+// TM and (c) 2015-2016 DreamWorks Animation LLC.  All Rights Reserved.
+// Reproduction in whole or in part without prior written permission of a
+// duly authorized representative is prohibited.
