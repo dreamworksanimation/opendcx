@@ -250,7 +250,7 @@ public:
         std::cout << "  in_bbox[" << input_bbox.x() << " " << input_bbox.y() << " " << input_bbox.r()-1 << " " << input_bbox.t()-1 << "]" << std::endl;
         std::cout << "  invert=" << k_invert << std::endl;
         std::cout << "  transform:" << std::endl << std::fixed << Dcx::DeepTransform::matrix();
-        std::cout << "  out_bbox" << ob << std::endl;
+        std::cout << "  out_bbox[" << ob.min.x << " " << ob.min.y << " " << ob.max.x << " " << ob.max.y << "]" << std::endl;
 #endif
 
         // Pad outut by one pixel, or 2 if we want black outside:
