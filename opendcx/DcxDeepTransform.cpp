@@ -71,6 +71,21 @@ XY_x_M44(float x, float y, const IMATH_NAMESPACE::M44f& m)
 //-------------------------------------------------------------------
 
 
+#if defined(DCX_DEBUG_RESAMPLING) || defined(DCX_DEBUG_COLLAPSING)
+//=============================================================================
+// TODO: this seems missing from IlmBase...where to put this...?
+//template <class T>
+std::ostream&
+operator << (std::ostream& os,
+             const IMATH_NAMESPACE::Box2i& b)
+{
+    os << "[" << b.min.x << " " << b.min.y << " " << b.max.x << " " << b.max.y << "]";
+    return os;
+}
+//=============================================================================
+#endif
+
+
 //-------------------------------------------------------------------------------
 
 
@@ -549,15 +564,14 @@ DeepTransform::sampleSegments (const DeepTile& deep_in_tile,
     if (debug_enable) {
         std::cout << "  ------------------------ sampleSegments ---------------------------" << std::endl;
         std::cout << "  DeepTransform::sampleSegments(): nSegments=" << nSegments;
-        std::cout << ", ss_rate=" << ss_rate << ", ss_rate_sqr=" << ss_rate_sqr;
-        std::cout << ", ss_width=" << ssW << std::endl;
+        std::cout << ", ss_rate=" << ss_rate << ", ss_rate_sqr=" << ss_rate_sqr << ", ss_width=" << ss_width << std::endl;
     }
 #endif
 
     Dcx::DeepPixel deep_in_pixel(sample_channels);
     //const float bin_scale = DeepFlags::maxSpCoverageScale / float(ss_rate_sqr);
-    std::vector<char> bin_hits(SpMask8::numBits);
-    std::vector<char> ss_weight_counts(ss_rate_sqr);
+    std::vector<uint32_t> bin_hits(SpMask8::numBits);
+    std::vector<uint32_t> ss_weight_counts(ss_rate_sqr);
     std::vector<SpMask8> ss_weight_masks(ss_rate_sqr);
     SpMask8 out_mask, out_opaque_mask, out_partial_mask;
     DeepSegment out_segment;
@@ -580,7 +594,7 @@ DeepTransform::sampleSegments (const DeepTile& deep_in_tile,
 #endif
 
         out_mask = out_opaque_mask = SpMask8::zeroCoverage;
-        memset(&bin_hits[0], 0, SpMask8::numBits);
+        memset(&bin_hits[0], 0, SpMask8::numBits*sizeof(uint32_t));
 
         // Sample subpixel locations at a potentially higher rate than 8x8,
         // building up the bin-hit counts and accumulated masks:
@@ -645,9 +659,9 @@ DeepTransform::sampleSegments (const DeepTile& deep_in_tile,
             for (int yy=SpMask8::height-1; yy>=0; --yy) {
                 std::cout << "  ";
                 for (int xx=0; xx < SpMask8::width; ++xx) {
-                    const int hits = bin_hits[yy*SpMask8::width + xx];
+                    const uint32_t hits = bin_hits[yy*SpMask8::width + xx];
                     if (hits > 0)
-                        printf(" %02d", hits);
+                        printf(" %02u", hits);
                     else
                         std::cout << "  .";
                 }
@@ -670,6 +684,9 @@ DeepTransform::sampleSegments (const DeepTile& deep_in_tile,
         // Partial mask is the enabled bits that are not opaque:
         out_partial_mask = (out_mask & ~out_opaque_mask);
 
+#ifdef DEBUG
+        assert(deep_in_tile.isInside(seg_ref.x, seg_ref.y));
+#endif
         deep_in_tile.getDeepPixel(seg_ref.x, seg_ref.y, deep_in_pixel);
         deep_in_pixel.setXY(seg_ref.x, seg_ref.y);
 #ifdef DEBUG
@@ -715,17 +732,19 @@ DeepTransform::sampleSegments (const DeepTile& deep_in_tile,
         {
             // Determine weights for each bin, then output the dominant weight, or
             // separate segments with the separate weights separated by subpixel bits:
-            memset(&ss_weight_counts[0], 0, ss_rate_sqr);
+            memset(&ss_weight_counts[0], 0, ss_rate_sqr*sizeof(uint32_t));
             memset(&ss_weight_masks[0],  0, ss_rate_sqr*sizeof(SpMask8));
 
             for (int sp_bin=0; sp_bin < SpMask8::numBits; ++sp_bin)
             {
-                const int hits = bin_hits[sp_bin];
-                if (hits == 0 || hits >= ss_rate_sqr)
-                     continue; // shouldn't happen...
-                // Increment weight count for ss bin:
-                ++ss_weight_counts[hits];
-                ss_weight_masks[hits] |= (SpMask8(1ull) << sp_bin);
+                const uint32_t hits = bin_hits[sp_bin];
+                // Skip empty or saturated bins:
+                if (hits > 0 && hits < ss_rate_sqr)
+                {
+                    // Partial count - increment weight count for ss bin:
+                    ++ss_weight_counts[hits];
+                    ss_weight_masks[hits] |= (SpMask8(1ull) << sp_bin);
+                }
             }
 
             // Output separate segments for each weight bin, building a unique
