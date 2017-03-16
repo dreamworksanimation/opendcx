@@ -58,19 +58,6 @@
 //-------------------------
 
 
-//=============================================================================
-// TODO: this seems missing from IlmBase...where to put this...?
-template <class T>
-std::ostream&
-operator << (std::ostream& os,
-             const IMATH_NAMESPACE::Box<T>& b)
-{
-    os << "[" << b.min.x << " " << b.min.y << " " << b.max.x << " " << b.max.y << "]";
-    return os;
-}
-//=============================================================================
-
-
 OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 
 
