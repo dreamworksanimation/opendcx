@@ -299,7 +299,8 @@ public:
         std::string flags_str;
         memset(k_spmask_array, 0, Dcx::SpMask8::numBits*sizeof(float));
 
-        if (sampleX >= deepInfo.x() && sampleX < deepInfo.r() &&
+        if (!get_channels.empty() &&
+            sampleX >= deepInfo.x() && sampleX < deepInfo.r() &&
             sampleY >= deepInfo.y() && sampleY < deepInfo.t()) {
 
             DD::Image::DeepPlane in_plane;
