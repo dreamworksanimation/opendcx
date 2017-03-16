@@ -123,6 +123,10 @@ dcxAddChannel (DD::Image::Channel z)
 {
     Dcx::ChannelIdx c = Dcx::Chan_Invalid;
 
+    // Find the Dcx channel matching the full name of the DD::Image::Channel,
+    // or create it:
+    context_lock.lock();
+
     // Explicity test for some deep channels that won't auto-translate
     // to predefined Dcx::ChannelIdxs:
     if (z == DD::Image::Chan_DeepFront)
@@ -130,14 +134,10 @@ dcxAddChannel (DD::Image::Channel z)
     else if (z == DD::Image::Chan_DeepBack)
         c = Dcx::Chan_ZBack;
     else
-    {
-        // Find the Dcx channel matching the full name of the DD::Image::Channel,
-        // or create it:
-        context_lock.lock();
         c = dcx_channel_context.getChannel(DD::Image::getName(z));
-        dcx_channel_map[z] = c; // Remember new channel:
-        context_lock.unlock();
-    }
+    dcx_channel_map[z] = c; // Remember new channel:
+    context_lock.unlock();
+
     assert(c != Dcx::Chan_Invalid); // shouldn't happen...
 
     //std::cout << "ddchan=" << (int)z << "'" << z << "' -> dcxchan=" << c << "'" << dcx_channel_context.getChannelFullName(c) << "'" << std::endl;
@@ -157,6 +157,7 @@ dcxChannel (DD::Image::Channel z)
     std::map<DD::Image::Channel, Dcx::ChannelIdx>::const_iterator it = dcx_channel_map.find(z);
     if (it != dcx_channel_map.end())
         return it->second;
+
     return dcxAddChannel(z); // not found, add it now
 }
 
