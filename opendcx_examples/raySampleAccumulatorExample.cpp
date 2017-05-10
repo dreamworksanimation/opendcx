@@ -436,7 +436,7 @@ main (int argc, char *argv[])
         if (verbose)
         {
             std::cout << "reading file '" << inFile << "'" << std::endl;
-            std::cout << "  in bbox" << inDeepTile.dataWindow() << std::endl;
+            std::cout << "  in bbox[" << inDeepTile.dataWindow().min.x << " " << inDeepTile.dataWindow().min.y << " " << inDeepTile.dataWindow().max.x << " " << inDeepTile.dataWindow().max.y << "]" << std::endl;
             inDeepTile.channels().print("  in channels=", std::cout, &chanCtx); std::cout << std::endl;
         }
 

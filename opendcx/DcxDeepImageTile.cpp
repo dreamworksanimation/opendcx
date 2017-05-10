@@ -232,7 +232,7 @@ DeepImageInputTile::getDeepPixel (int x,
     {
         ds.Zf = ds.Zb = getChannelSampleValueAt(x, y, sample, m_chan_ptrs[Dcx::Chan_ZFront]);
         // Skip samples with negative, infinite or nan Zfront:
-        if (ds.Zf < 0.0f || isinf(ds.Zf) || isnan(ds.Zf))
+        if (ds.Zf < 0.0f || isnan(ds.Zf))
             continue;
 
         if (have_Zb)

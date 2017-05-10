@@ -80,10 +80,6 @@ static DD::Image::Lock context_lock;
 //
 // Assign/get the DD::Image::Channels that are appropriate for OpenDCX.
 //
-// This calls DD::Image::getChannel() with 'sort=false' so that Nuke does
-// not reorder the channels in the 'spmask' layer - we always want the order
-// to be sp1, sp2, flags so that ChannelKnobs display correctly by default.
-//
 
 void
 dcxGetSpmaskChannels (DD::Image::Channel& sp1,
@@ -97,9 +93,14 @@ dcxGetSpmaskChannels (DD::Image::Channel& sp1,
     flags = DD::Image::getChannel(Dcx::flagsChannelName,    false/*sort*/);
 }
 
+//
 // This should get called before any Op ctors so that the DCX channels are
 // constructed properly even if getChannels() is called from an Op with
-// sort=true:
+// sort=true.
+//
+// TODO: I don't think this is needed anymore since the layer/channel renaming.
+//
+
 struct GetDcxChannels {
 
     GetDcxChannels()
@@ -121,7 +122,7 @@ static GetDcxChannels get_dcx_chans;
 Dcx::ChannelIdx
 dcxAddChannel (DD::Image::Channel z)
 {
-    Dcx::ChannelIdx c = Dcx::Chan_Invalid;
+    Dcx::ChannelIdx dcx_chan = Dcx::Chan_Invalid;
 
     // Find the Dcx channel matching the full name of the DD::Image::Channel,
     // or create it:
@@ -130,18 +131,21 @@ dcxAddChannel (DD::Image::Channel z)
     // Explicity test for some deep channels that won't auto-translate
     // to predefined Dcx::ChannelIdxs:
     if (z == DD::Image::Chan_DeepFront)
-        c = Dcx::Chan_ZFront;
+        dcx_chan = Dcx::Chan_ZFront;
     else if (z == DD::Image::Chan_DeepBack)
-        c = Dcx::Chan_ZBack;
+        dcx_chan = Dcx::Chan_ZBack;
     else
-        c = dcx_channel_context.getChannel(DD::Image::getName(z));
-    dcx_channel_map[z] = c; // Remember new channel:
+        dcx_chan = dcx_channel_context.getChannel(DD::Image::getName(z));
+
+    dcx_channel_map[z] = dcx_chan; // Remember the new channel
+
     context_lock.unlock();
 
-    assert(c != Dcx::Chan_Invalid); // shouldn't happen...
+    //std::cout << "ddchan=" << (int)z << "'" << z << "' -> dcxchan=" << dcx_chan;
+    //std::cout << "'" << dcx_channel_context.getChannelFullName(dcx_chan) << "'" << std::endl;
+    assert(dcx_chan != Dcx::Chan_Invalid); // shouldn't happen...
 
-    //std::cout << "ddchan=" << (int)z << "'" << z << "' -> dcxchan=" << c << "'" << dcx_channel_context.getChannelFullName(c) << "'" << std::endl;
-    return c;
+    return dcx_chan;
 }
 
 
@@ -154,9 +158,15 @@ dcxAddChannel (DD::Image::Channel z)
 Dcx::ChannelIdx
 dcxChannel (DD::Image::Channel z)
 {
+    context_lock.lock();
     std::map<DD::Image::Channel, Dcx::ChannelIdx>::const_iterator it = dcx_channel_map.find(z);
     if (it != dcx_channel_map.end())
-        return it->second;
+    {
+        const Dcx::ChannelIdx dcx_chan = it->second;
+        context_lock.unlock();
+        return dcx_chan;
+    }
+    context_lock.unlock();
 
     return dcxAddChannel(z); // not found, add it now
 }
@@ -228,7 +238,7 @@ dcxCopyDDImageDeepPixel (const DD::Image::DeepPixel& in,
     {
         Zf = in.getUnorderedSample(sample, DD::Image::Chan_DeepFront);
         // Skip samples with negative, infinite or nan Zfront:
-        if (Zf < 0.0f || isinf(Zf) || isnan(Zf))
+        if (Zf < 0.0f || isnan(Zf))
             continue;
 
         if (have_Zb)
@@ -280,7 +290,7 @@ dcxCopyDDImageDeepSample (const DD::Image::DeepPixel& in,
 
     // Skip samples with negative, inf or nan Zfront:
     const float Zf = in.getUnorderedSample(sample, DD::Image::Chan_DeepFront);
-    if (Zf < 0.0f || isinf(Zf) || isnan(Zf))
+    if (Zf < 0.0f || isnan(Zf))
         return false;
 
     segment_out.index = -1; // default to unassigned!

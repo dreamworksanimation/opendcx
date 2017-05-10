@@ -1259,16 +1259,13 @@ DeepPixel::buildSegmentEdges (const SpMask8& spmask,
         }
 #endif
 
-        if (!isinf(segment.Zf) || !isinf(segment.Zb))
-        {
-            if (segment.isThin())
-                segment_edges.push_back(DeepSegment::Edge(segment.Zf, j, DeepSegment::Edge::THIN ));
+        if (segment.isThin())
+            segment_edges.push_back(DeepSegment::Edge(segment.Zf, j, DeepSegment::Edge::THIN ));
 
-            else
-            {
-                segment_edges.push_back(DeepSegment::Edge(segment.Zf, j, DeepSegment::Edge::FRONT));
-                segment_edges.push_back(DeepSegment::Edge(segment.Zb, j, DeepSegment::Edge::BACK ));
-            }
+        else
+        {
+            segment_edges.push_back(DeepSegment::Edge(segment.Zf, j, DeepSegment::Edge::FRONT));
+            segment_edges.push_back(DeepSegment::Edge(segment.Zb, j, DeepSegment::Edge::BACK ));
         }
     }
 

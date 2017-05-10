@@ -353,8 +353,6 @@ DeepTransform::sample (int outX, int outY,
             for (uint32_t segment_index=0; segment_index < nSegments; ++segment_index)
             {
                 const DeepSegment& in_segment = deep_in_pixel.getSegment(segment_index);
-                if (isinf(in_segment.Zf) || isinf(in_segment.Zb))
-                    continue;
                 sample_segments.push_back(SegmentRef(tX, tY, segment_index, in_segment.Zf, in_segment.spMask()));
             }
 
@@ -462,8 +460,6 @@ void DeepTransform::transformPixel (const DeepTile& deep_in_tile,
         for (uint32_t i=0; i < nSegments; ++i)
         {
             const DeepSegment& in_segment = deep_pixel.getSegment(i);
-            if (isinf(in_segment.Zf) || isinf(in_segment.Zb))
-                continue;
             sample_segments.push_back(SegmentRef(inX, inY, i, in_segment.Zf, in_segment.spMask()));
         }
         std::sort(sample_segments.begin(), sample_segments.end());

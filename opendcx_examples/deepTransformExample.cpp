@@ -307,7 +307,7 @@ main (int argc, char *argv[])
         if (verbose)
         {
             std::cout << "reading file '" << inFile << std::endl;
-            std::cout << "  in bbox" << in_bbox;
+            std::cout << "  in bbox[" << in_bbox.min.x << " " << in_bbox.min.y << " " << in_bbox.max.x << " " << in_bbox.max.y << "]";
             inDeepTile.channels().print(", in channels=", std::cout, &chanCtx);
             std::cout << std::endl;
         }
@@ -348,7 +348,7 @@ main (int argc, char *argv[])
         if (verbose) {
             std::cout << "  transform:" << std::endl << std::fixed << xform.matrix();
             std::cout << "  out file '" << outFile << std::endl;
-            std::cout << "  out_bbox" << out_bbox;
+            std::cout << "  out bbox[" << out_bbox.min.x << " " << out_bbox.min.y << " " << out_bbox.max.x << " " << out_bbox.max.y << "]";
             outDeepTile.channels().print(", out channels=", std::cout, &chanCtx);
             std::cout << std::endl;
         }

@@ -67,8 +67,7 @@ OPENDCX_INTERNAL_NAMESPACE_HEADER_ENTER
 // Assign/get the DD::Image::Channels that are appropriate for OpenDCX.
 //
 // This calls DD::Image::getChannel() with 'sort=false' so that Nuke does
-// not reorder the channels in the 'spmask' layer - we always want the order
-// to be sp1/sp2/flags so that ChannelKnobs display correctly by default.
+// not reorder the channels in the layers.
 //
 // To help ensure this there's a static dummy object that calls this method
 // so that the layer and channels are assigned in Nuke before any Op
