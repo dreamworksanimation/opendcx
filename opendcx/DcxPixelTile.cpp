@@ -59,7 +59,7 @@ PixelTile::PixelTile (const OPENEXR_IMF_NAMESPACE::Header& header,
     m_top_reference(header.displayWindow().max.y),
     m_channel_ctx(&channel_ctx)
 {
-    setDataWindow(header.dataWindow(), true/*sourceWindowsYAxisUp*/); // May flip the data window
+    setDataWindow(header.dataWindow(), true/*sourceWindowsYAxisUp*/, true/*force*/); // May flip the data window
 }
 
 PixelTile::PixelTile (const IMATH_NAMESPACE::Box2i& display_window,
@@ -73,8 +73,8 @@ PixelTile::PixelTile (const IMATH_NAMESPACE::Box2i& display_window,
     m_dataWindow(data_window),
     m_channel_ctx(&channel_ctx)
 {
-    setDataWindow(data_window, sourceWindowsYAxisUp); // May flip the data window
-    setChannels(channels);
+    setDataWindow(data_window, sourceWindowsYAxisUp, true/*force*/); // May flip the data window
+    setChannels(channels, true/*force*/);
 }
 
 PixelTile::PixelTile (const IMATH_NAMESPACE::Box2i& data_window,
@@ -88,8 +88,8 @@ PixelTile::PixelTile (const IMATH_NAMESPACE::Box2i& data_window,
     m_dataWindow(data_window),
     m_channel_ctx(&channel_ctx)
 {
-    setDataWindow(data_window, sourceWindowsYAxisUp); // May flip the data window
-    setChannels(channels);
+    setDataWindow(data_window, sourceWindowsYAxisUp, true/*force*/); // May flip the data window
+    setChannels(channels, true/*force*/);
 }
 
 PixelTile::PixelTile (const PixelTile& b) :
@@ -107,7 +107,8 @@ PixelTile::PixelTile (const PixelTile& b) :
 /*virtual*/
 void
 PixelTile::setDataWindow (const IMATH_NAMESPACE::Box2i& data_window,
-                          bool sourceWindowYAxisUp)
+                          bool sourceWindowYAxisUp,
+                          bool /*force*/)
 {
     m_dataWindow = data_window;
     // Flip data window vertically if source window is flipped:
@@ -121,7 +122,8 @@ PixelTile::setDataWindow (const IMATH_NAMESPACE::Box2i& data_window,
 
 /*virtual*/
 void
-PixelTile::setChannels (const ChannelSet& channels)
+PixelTile::setChannels (const ChannelSet& channels,
+                        bool /*force*/)
 {
     m_channels.clear();
     if (!m_channel_ctx)

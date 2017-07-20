@@ -298,25 +298,35 @@ class DCX_EXPORT DeepImageOutputTile : public DeepTile, public ImageFormat
 
     //
     // Change the set of channels.
-    // Possibly destructive! All existing deep data will be deleted
-    // if the new channel set is different than the current one.
+    // Possibly destructive! If 'force'==true or the new channel set is
+    // different than the current one all existing deep data will be deleted.
     //
 
-    /*virtual*/ void    setChannels (const Dcx::ChannelSet&);
+    /*virtual*/ void    setChannels (const Dcx::ChannelSet&,
+                                     bool force=false);
 
 
     //
     // Change the active data window.
-    // Destructive! All existing deep data will be deleted if the new
-    // dataWindow is different than the current one.
+    // Possibly destructive! If 'force'==true or the new dataWindow is
+    // different than the current one all existing deep data will be deleted.
     //
 
     /*virtual*/ void    setDataWindow (const IMATH_NAMESPACE::Box2i& data_window,
-                                       bool sourceWindowYAxisUp=true);
+                                       bool sourceWindowYAxisUp=true,
+                                       bool force=false);
 
+
+    //
+    // Returns the number of total bytes used for the entire tile.
+    //
 
     size_t      bytesUsed () const;
 
+
+    //
+    // Get the DeepLine object for pixel-space line y
+    //
 
     DeepLine*   getLine (int y) const;
 

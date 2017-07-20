@@ -166,7 +166,8 @@ class DCX_EXPORT PixelTile
     //--------------------------------------------------------------------------
 
     virtual void    setDataWindow (const IMATH_NAMESPACE::Box2i& data_window,
-                                   bool sourceWindowYAxisUp=true);
+                                   bool sourceWindowYAxisUp=true,
+                                   bool force=false);
 
 
     //----------------------------
@@ -180,7 +181,8 @@ class DCX_EXPORT PixelTile
     // Virtual so that subclasses can reallocate memory, etc.
     //-------------------------------------------------------
 
-    virtual void setChannels (const ChannelSet&);
+    virtual void setChannels (const ChannelSet&,
+                              bool force=false);
 
     //------------------------------------------------
     // Number of color/aov channels in the ChannelSet.

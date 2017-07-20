@@ -155,7 +155,8 @@ class DCX_EXPORT DeepTile : public PixelTile
     // count and the flags channel.
     //
 
-    /*virtual*/ void setChannels (const ChannelSet& channels);
+    /*virtual*/ void setChannels (const ChannelSet& channels,
+                                  bool force=false);
 
 
     //

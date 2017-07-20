@@ -116,9 +116,10 @@ DeepTile::DeepTile (const DeepTile& b) :
 
 /*virtual*/
 void
-DeepTile::setChannels (const ChannelSet& channels)
+DeepTile::setChannels (const ChannelSet& channels,
+                       bool force)
 {
-    PixelTile::setChannels(channels);
+    PixelTile::setChannels(channels, force);
     // Get the spmask and flag channel assignments:
     m_spmask_channel[0] = m_spmask_channel[1] = Dcx::Chan_Invalid;
     m_flags_channel = Dcx::Chan_Invalid;

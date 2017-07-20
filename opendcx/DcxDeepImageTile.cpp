@@ -311,7 +311,7 @@ DeepImageOutputTile::DeepImageOutputTile (const IMATH_NAMESPACE::Box2i& display_
     m_channels += m_spmask_channel[1];
     m_channels += m_flags_channel;
 #endif
-    setDataWindow(data_window, sourceWindowsYup);
+    setDataWindow(data_window, sourceWindowsYup, true/*force*/);
 }
 
 
@@ -322,7 +322,7 @@ DeepImageOutputTile::DeepImageOutputTile (const DeepImageInputTile& b,
     ImageFormat(b),
     m_file(0)
 {
-    setDataWindow(data_window, sourceWindowYup);
+    setDataWindow(data_window, sourceWindowYup, true/*force*/);
 }
 
 DeepImageOutputTile::DeepImageOutputTile (const ImageFormat& format,
@@ -333,7 +333,7 @@ DeepImageOutputTile::DeepImageOutputTile (const ImageFormat& format,
     ImageFormat(format),
     m_file(0)
 {
-    setDataWindow(data_window, sourceWindowYup);
+    setDataWindow(data_window, sourceWindowYup, true/*force*/);
 }
 
 DeepImageOutputTile::DeepImageOutputTile (const DeepImageInputTile& b) :
@@ -350,7 +350,7 @@ DeepImageOutputTile::DeepImageOutputTile (const ImageFormat& format,
     ImageFormat(format),
     m_file(0)
 {
-    setDataWindow(m_dataWindow, m_yaxis_up);
+    setDataWindow(m_dataWindow, m_yaxis_up, true/*force*/);
 }
 
 
@@ -365,21 +365,23 @@ DeepImageOutputTile::~DeepImageOutputTile ()
 
 /*virtual*/
 void
-DeepImageOutputTile::setChannels (const ChannelSet& channels)
+DeepImageOutputTile::setChannels (const ChannelSet& channels,
+                                  bool force)
 {
-    if (channels == m_channels)
+    if (!force && channels == m_channels)
         return; // no change, do nothing
     deleteDeepLines();
-    DeepTile::setChannels(channels);
+    DeepTile::setChannels(channels, force);
 }
 
 
 /*virtual*/
 void
 DeepImageOutputTile::setDataWindow (const IMATH_NAMESPACE::Box2i& data_window,
-                                    bool sourceWindowYAxisUp)
+                                    bool sourceWindowYAxisUp,
+                                    bool force)
 {
-    if (data_window == m_dataWindow)
+    if (!force && data_window == m_dataWindow)
         return; // no change, do nothing
     deleteDeepLines();
     DeepTile::setDataWindow(data_window, sourceWindowYAxisUp);
